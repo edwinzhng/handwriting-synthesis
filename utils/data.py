@@ -5,7 +5,7 @@ import tensorflow as tf
 
 
 class Dataloader:
-    def __init__(self, batch_size=32, train_split=0.95, buffer_size=100):
+    def __init__(self, batch_size=64, train_split=0.95, buffer_size=100):
         self.batch_size = batch_size
         self.train_split = train_split
         self.buffer_size = buffer_size
@@ -26,7 +26,9 @@ class Dataloader:
         train_dataset = tf.data.Dataset.from_tensor_slices(train_strokes)
         train_dataset = train_dataset.batch(self.batch_size)
         self.train_dataset = train_dataset.shuffle(buffer_size=self.buffer_size)
+        self.num_train_batches = np.ceil(len(train_strokes) / self.batch_size)
 
         valid_dataset = tf.data.Dataset.from_tensor_slices(valid_strokes)
         valid_dataset = valid_dataset.batch(self.batch_size)
         self.valid_dataset = valid_dataset.shuffle(buffer_size=self.buffer_size)
+        self.num_valid_batches = np.ceil(len(valid_strokes) / self.batch_size)
