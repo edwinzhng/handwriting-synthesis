@@ -1,6 +1,4 @@
-import numpy
-strokes = numpy.load('../data/strokes-py3.npy', allow_pickle=True)
-stroke = strokes[0]
+import numpy as np
 
 
 def generate_unconditionally(random_seed=1):
