@@ -1,14 +1,19 @@
+import os
+
+import numpy as np
 import tensorflow as tf
 
 
 class UnconditionalRNN:
-    def __init__(self, num_layers=3, num_cells=400, num_mixtures=20):
+    def __init__(self, num_layers=3, num_cells=400, num_mixtures=20, lr=0.0001):
         self.input_size = 3
         self.num_layers = num_layers
         self.num_mixtures = num_mixtures
         self.num_cells = num_cells
-        self.optimizer = tf.keras.optimizers.Adam()
-        
+        self.optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
+        self.weights_folder = '../data/models'
+        self.weights_path = os.path.join(self.weights_folder, 'unconditional.h5')
+
         self.build_model()
 
     def build_model(self):
@@ -40,19 +45,24 @@ class UnconditionalRNN:
         self.model = tf.keras.Model(inputs=self.inputs, outputs=self.outputs)
         self.model.summary()
 
+    # expands dims of coordinates for gaussian and loss calculations
+    def expand_dims(self, inputs, axis, N):
+        return tf.concat([tf.expand_dims(inputs, axis) for _ in range(N)], axis)
+
     # Equations (18 - 23)
     def output_vector(self, outputs):
-        e_hat = outputs[:, 0]
-        pi_hat, mu_hat1, mu_hat2, sigma_hat1, sigma_hat2, rho_hat = tf.split(outputs[:, 1:], 6, 1)
+        e_hat = outputs[:, :, 0]
+        pi_hat, mu_hat1, mu_hat2, sigma_hat1, sigma_hat2, rho_hat = tf.split(outputs[:, :, 1:], 6, 2)
         
         # calculate actual values
         end_stroke = tf.math.sigmoid(e_hat)
-        mixture_weight = tf.math.softmax(pi_hat, axis=1)
+        mixture_weight = tf.math.softmax(pi_hat, axis=-1)
         mean1 = mu_hat1
         mean2 = mu_hat2
         stddev1 = tf.math.exp(sigma_hat1)
         stddev2 = tf.math.exp(sigma_hat2)
         correl = tf.math.tanh(rho_hat)
+
         return [end_stroke, mixture_weight, mean1, mean2, stddev1, stddev2, correl]
 
     # Equation (24, 25)
@@ -63,23 +73,44 @@ class UnconditionalRNN:
             / (2 * np.pi * stddev1 * stddev2 * tf.math.sqrt(1 - tf.math.square(correl)))
 
     # Equation (26)
-    def loss(self, x1, x2, x3, stddev1, stddev2, mean1, mean2, correl, mixture_weight, end_stroke):
-        gaussian = self.bivariate_gaussian(x1, x2, stddev1, stddev2, mean1, mean2, correl)
-        left_term_inner = tf.reduce_sum(tf.math.multiply(mixture_weight, gaussian), 1, keep_dims=True)
-        left_term = -tf.math.log(left_term_inner)
-        right_term = -tf.math.log(tf.cond(x3 == 1, lambda: end_stroke, lambda: 1 - end_stroke))
+    def loss(self, x1, x2, x3, mean1, mean2, stddev1, stddev2, correl, mixture_weight, end_stroke):
+        min_value = 1e-20 # required for logs to not be NaN when value is zero
+        gaussian = self.bivariate_gaussian(self.expand_dims(x1, -1, self.num_mixtures),
+                                           self.expand_dims(x2, -1, self.num_mixtures),
+                                           stddev1, stddev2, mean1, mean2, correl)
+        left_term_inner = tf.reduce_sum(tf.math.multiply(mixture_weight, gaussian), axis=-1, keepdims=True)
+        left_term = -tf.math.log(tf.maximum(left_term_inner, min_value))
+        right_term_inner = -tf.math.log(tf.maximum((end_stroke + 1e-1) * x3 + (1 - end_stroke) * (1 - x3), min_value))
+        right_term = -tf.math.log(right_term_inner)
+        right_term = self.expand_dims(right_term, -1, 1)
+        tf.print(left_term)
+        tf.print(right_term)
         return tf.reduce_sum(left_term + right_term)
 
     @tf.function
     def train_step(self, inputs):
         loss = 0
         with tf.GradientTape() as tape:
-            pass
-        batch_loss = (loss / int(inputs.shape[0]))
-        variables = self.model.trainable_variables
-        gradients = tape.gradient(loss, variables)
-        self.optimizer.apply_gradients(zip(gradients, variables))
-        return batch_loss
+            outputs = self.model(inputs)
+            end_stroke, mixture_weight, mean1, mean2, stddev1, stddev2, correl = self.output_vector(outputs)
+            loss_value = self.loss(inputs[:,:,0], inputs[:,:,1], inputs[:,:,2],
+                                   mean1, mean2, stddev1, stddev2, correl, mixture_weight, end_stroke)
+            loss_value /= (inputs.shape[0] * inputs.shape[1])
+            tf.print(loss_value)
 
-    def generate_handwriting(self):
+        trainable_vars = self.model.trainable_variables
+        gradients = tape.gradient(loss_value, trainable_vars)
+        self.optimizer.apply_gradients(zip(gradients, trainable_vars))
+        return loss_value
+
+    def generate(self):
         pass
+
+    def save(self):
+        if not os.path.exists(self.weights_folder):
+            os.makedirs(self.weights_folder, exist_ok=True)
+        self.model.save(self.weights_path)
+
+    def load(self):
+        if os.path.exists(self.weights_path):
+            self.model.load(self.weights_path)
