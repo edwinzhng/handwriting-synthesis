@@ -3,10 +3,19 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 import tensorflow as tf
+from tqdm import tqdm
+
+from utils.data import Dataloader
 
 
 class BaseRNN(ABC):
-    def __init__(self, weights_path, num_layers=3, num_mixtures=20, num_cells=400, lr=0.0001, gradient_clip=100):
+    def __init__(self,
+                 weights_path,
+                 num_layers=3,
+                 num_mixtures=20,
+                 num_cells=400,
+                 lr=0.0001,
+                 gradient_clip=100):
         self.input_size = 3
         self.num_layers = num_layers
         self.num_mixtures = num_mixtures
@@ -21,6 +30,10 @@ class BaseRNN(ABC):
         pass
 
     @abstractmethod
+    def loss(self):
+        pass
+
+    @abstractmethod
     def train_step(self):
         pass
 
@@ -28,15 +41,42 @@ class BaseRNN(ABC):
     def generate(self):
         pass
 
-    def lstm_layer(self, layer_inputs, input_shape):
-        return tf.keras.layers.LSTM(self.num_cells, input_shape=input_shape, return_sequences=True,
+    def lstm_layer(self, layer_inputs, input_shape, stateful=True):
+        return tf.keras.layers.LSTM(self.num_cells,
+                                    input_shape=input_shape,
+                                    stateful=stateful,
+                                    return_sequences=True,
                                     kernel_initializer=self.initalizer,
                                     recurrent_initializer=self.initalizer,
-                                    use_bias=True, bias_initializer="zeros")(layer_inputs)
+                                    use_bias=True,
+                                    bias_initializer="zeros")(layer_inputs)
 
     # expands dims of coordinates for gaussian and loss calculations
     def expand_dims(self, inputs, axis, num_dims):
         return tf.concat([tf.expand_dims(inputs, axis) for _ in range(num_dims)], axis)
+
+    # Equations (18 - 23)
+    def output_vector(self, outputs):
+        e_hat = outputs[:, :, 0]
+        pi_hat, mu_hat1, mu_hat2, sigma_hat1, sigma_hat2, rho_hat = tf.split(outputs[:, :, 1:], 6, 2)
+
+        # calculate actual values
+        end_stroke = tf.math.sigmoid(e_hat)
+        mixture_weight = tf.math.softmax(pi_hat, axis=-1)
+        mean1 = mu_hat1
+        mean2 = mu_hat2
+        stddev1 = tf.math.exp(sigma_hat1)
+        stddev2 = tf.math.exp(sigma_hat2)
+        correl = tf.math.tanh(rho_hat)
+
+        return [end_stroke, mixture_weight, mean1, mean2, stddev1, stddev2, correl]
+
+    # Equation (24, 25)
+    def bivariate_gaussian(self, x, y, stddev1, stddev2, mean1, mean2, correl):
+        Z = tf.math.square((x - mean1) / stddev1) + tf.math.square((y - mean2) / stddev2) \
+            - (2 * correl * (x - mean1) * (y - mean2) / (stddev1 * stddev2))
+        return tf.math.exp(-Z / (2 * (1 - tf.math.square(correl)))) \
+            / (2 * np.pi * stddev1 * stddev2 * tf.math.sqrt(1 - tf.math.square(correl)))
 
     def save(self):
         self.model.save_weights(self.weights_path, overwrite=True)
@@ -48,3 +88,30 @@ class BaseRNN(ABC):
             print("Model weights loaded from {}".format(self.weights_path))
         else:
             print("No model weights to load found")
+
+    def train(self, epochs=10, batch_size=32):
+        self.build_model(batch_size=batch_size)
+        self.model.summary()
+        dataloader = Dataloader(batch_size=batch_size)
+        prev_loss = float('inf')
+
+        print("Training model...")
+        for epoch in range(epochs):
+            train_losses = []
+            epoch_loss = 0.0
+            batches = tqdm(dataloader.train_dataset, total=dataloader.num_train_batches,
+                            leave=False, desc="Epoch: {}/{}".format(epoch + 1, epochs))
+            for batch in batches:
+                loss = self.train_step(batch)
+                train_losses.append(loss)
+                epoch_loss = np.mean(train_losses)
+                batches.set_description("Epoch: {}/{}, Loss: {:.6f}".format(epoch + 1, epochs, epoch_loss))
+            print("Finished Epoch {} with average loss of {:.6f}".format(epoch + 1, epoch_loss))
+
+            if epoch_loss < prev_loss:
+                self.save()
+                self.generate()
+                self.build_model(batch_size=batch_size)
+                prev_loss = epoch_loss
+            else:
+                print("Skipping model save, loss increased from {} to {}".format(prev_loss, epoch_loss))
