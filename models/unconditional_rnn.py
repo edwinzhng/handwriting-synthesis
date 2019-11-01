@@ -8,8 +8,6 @@ import tensorflow_probability as tfp
 from utils import plot_stroke
 from models.base_rnn import BaseRNN
 
-np.set_printoptions(threshold=np.inf)
-
 class UnconditionalRNN(BaseRNN):
     def __init__(self, *args, **kwargs):
         super().__init__("models/weights/unconditional.h5", *args, **kwargs)
@@ -42,7 +40,7 @@ class UnconditionalRNN(BaseRNN):
     def output_vector(self, outputs):
         e_hat = outputs[:, :, 0]
         pi_hat, mu_hat1, mu_hat2, sigma_hat1, sigma_hat2, rho_hat = tf.split(outputs[:, :, 1:], 6, 2)
-        
+
         # calculate actual values
         end_stroke = tf.math.sigmoid(e_hat)
         mixture_weight = tf.math.softmax(pi_hat, axis=-1)
@@ -63,16 +61,18 @@ class UnconditionalRNN(BaseRNN):
 
     # Equation (26)
     def loss(self, x, y, input_end, mean1, mean2, stddev1, stddev2, correl, mixture_weight, end_stroke):
-        min_value = 1e-24 # required for logs to not be NaN when value is zero
+        min_value = 1e-18 # required for logs to not be NaN when value is zero
         gaussian = self.bivariate_gaussian(self.expand_dims(x, -1, self.num_mixtures),
                                            self.expand_dims(y, -1, self.num_mixtures),
                                            stddev1, stddev2, mean1, mean2, correl)
         gaussian_loss = tf.reduce_sum(tf.math.multiply(mixture_weight, gaussian), axis=-1, keepdims=True)
-        gaussian_loss = -tf.math.log(tf.maximum(gaussian_loss, min_value))
-        bernoulli_loss = (end_stroke) * input_end + (1 - end_stroke) * (1 - input_end)
-        bernoulli_loss = -tf.math.log(tf.maximum(bernoulli_loss, min_value))
+        gaussian_loss = tf.math.log(tf.maximum(gaussian_loss, min_value))
+
+        bernoulli_loss = (end_stroke * input_end) + ((1 - end_stroke) * (1 - input_end))
+        bernoulli_loss = tf.math.log(tf.maximum(bernoulli_loss, min_value))
         bernoulli_loss = self.expand_dims(bernoulli_loss, -1, 1)
-        return tf.reduce_sum(gaussian_loss + bernoulli_loss)
+
+        return tf.reduce_sum(tf.math.negative(gaussian_loss + bernoulli_loss), axis=-1)
 
     @tf.function
     def train_step(self, inputs):
@@ -81,7 +81,8 @@ class UnconditionalRNN(BaseRNN):
             end_stroke, mixture_weight, mean1, mean2, stddev1, stddev2, correl = self.output_vector(outputs)
             loss_value = self.loss(inputs[:,:,1], inputs[:,:,2], inputs[:,:,0], mean1, mean2,
                                    stddev1, stddev2, correl, mixture_weight, end_stroke)
-            loss_value /= (inputs.shape[0] * inputs.shape[1])
+            # divide by batch size
+            loss_value /= inputs.shape[0]
 
         trainable_vars = self.model.trainable_variables
         gradients = tape.gradient(loss_value, trainable_vars)
@@ -122,5 +123,4 @@ class UnconditionalRNN(BaseRNN):
         # remove first zeros
         sample = sample[:,1:]
         plot_stroke(sample, save_name='samples/unconditional/generated.jpeg')
-        tf.print(sample, summarize=-1)
         return sample

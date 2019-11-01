@@ -15,7 +15,6 @@ def train_unconditional(epochs=10):
     prev_loss = float('inf')
 
     print("Starting training...")
-    model.generate()
     for epoch in range(epochs):
         train_losses = []
         epoch_loss = 0.0
