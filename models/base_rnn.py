@@ -93,25 +93,40 @@ class BaseRNN(ABC):
         self.build_model(batch_size=batch_size)
         self.model.summary()
         dataloader = Dataloader(batch_size=batch_size)
+        train_loss = float('inf')
         prev_loss = float('inf')
 
         print("Training model...")
         for epoch in range(epochs):
+            dataloader.load_datasets()
             train_losses = []
-            epoch_loss = 0.0
             batches = tqdm(dataloader.train_dataset, total=dataloader.num_train_batches,
-                            leave=False, desc="Epoch: {}/{}".format(epoch + 1, epochs))
+                            leave=True, desc="Epoch: {}/{}".format(epoch + 1, epochs))
             for batch in batches:
                 loss = self.train_step(batch)
                 train_losses.append(loss)
-                epoch_loss = np.mean(train_losses)
-                batches.set_description("Epoch: {}/{}, Loss: {:.6f}".format(epoch + 1, epochs, epoch_loss))
-            print("Finished Epoch {} with average loss of {:.6f}".format(epoch + 1, epoch_loss))
+                train_loss = np.mean(train_losses)
+                batches.set_description("Epoch: {}/{}, Loss: {:.6f}".format(epoch + 1, epochs, train_loss))
 
-            if epoch_loss < prev_loss:
+            validation_loss = self.validation(dataloader, batch_size)
+            print("Finished Epoch {} with training loss {:.6f} and validation loss {:.6f}".format(
+                  epoch + 1, train_loss, validation_loss))
+
+            if train_loss < prev_loss:
                 self.save()
                 self.generate()
                 self.build_model(batch_size=batch_size)
-                prev_loss = epoch_loss
+                prev_loss = train_loss
             else:
-                print("Skipping model save, loss increased from {} to {}".format(prev_loss, epoch_loss))
+                print("Skipping model save, loss increased from {} to {}".format(prev_loss, train_loss))
+
+    def validation(self, dataloader, batch_size=32):
+        valid_losses = []
+        batches = tqdm(dataloader.valid_dataset, total=dataloader.num_valid_batches,
+                       leave=True, desc="Validation")
+        for batch in batches:
+            loss = self.train_step(batch, update_gradients=False)
+            valid_losses.append(loss)
+            batches.set_description("Validation Loss: {:.6f}".format(np.mean(valid_losses)))
+
+        return np.mean(valid_losses)

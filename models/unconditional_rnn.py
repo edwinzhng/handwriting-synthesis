@@ -48,7 +48,7 @@ class UnconditionalRNN(BaseRNN):
         return tf.reduce_sum(tf.math.negative(gaussian_loss + bernoulli_loss))
 
     @tf.function
-    def train_step(self, inputs):
+    def train_step(self, inputs, update_gradients=True):
         self.model.reset_states()
         with tf.GradientTape() as tape:
             outputs = self.model(inputs)
@@ -58,10 +58,11 @@ class UnconditionalRNN(BaseRNN):
             # divide by batch size
             loss_value /= inputs.shape[0]
 
-        trainable_vars = self.model.trainable_variables
-        gradients = tape.gradient(loss_value, trainable_vars)
-        gradients, _ = tf.clip_by_global_norm(gradients, self.gradient_clip)
-        self.optimizer.apply_gradients(zip(gradients, trainable_vars))
+        if update_gradients:
+            trainable_vars = self.model.trainable_variables
+            gradients = tape.gradient(loss_value, trainable_vars)
+            gradients, _ = tf.clip_by_global_norm(gradients, self.gradient_clip)
+            self.optimizer.apply_gradients(zip(gradients, trainable_vars))
         return loss_value
 
     def generate(self, max_timesteps=400, seed=None, filepath='samples/unconditional/generated.jpeg'):

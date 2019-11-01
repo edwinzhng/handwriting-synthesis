@@ -10,7 +10,6 @@ class Dataloader:
         self.train_split = train_split
         self.buffer_size = buffer_size
         self.drop_remainder = drop_remainder
-        self.load_datasets()
 
     def load_datasets(self):
         base_path = Path(__file__).parent
