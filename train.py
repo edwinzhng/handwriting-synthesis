@@ -14,25 +14,25 @@ def train_unconditional(epochs=10):
     model.load()
     prev_loss = float('inf')
 
-    print(f"Starting training...")
+    print("Starting training...")
     model.generate()
     for epoch in range(epochs):
         train_losses = []
         epoch_loss = 0.0
         batches = tqdm(dataloader.train_dataset, total=dataloader.num_train_batches,
-                        leave=False, desc=f"Epoch: {epoch + 1}/{epochs}")
+                        leave=False, desc="Epoch: {}/{}".format(epoch + 1, epochs))
         for batch in batches:
             loss = model.train_step(batch)
             train_losses.append(loss)
             epoch_loss = np.mean(train_losses)
-            batches.set_description(f"Epoch: {epoch + 1}/{epochs}, Loss: {epoch_loss:.6f} ")
-        print(f"Finished Epoch {epoch + 1} with average loss of {epoch_loss:.6f}")
+            batches.set_description("Epoch: {}/{}, Loss: {:.6f} ".format(epoch + 1, epochs, epoch_loss))
+        print("Finished Epoch {} with average loss of {:.6f}".format(epoch + 1, epoch_loss))
 
         if epoch_loss < prev_loss:
             model.save()
             model.generate()
             prev_loss = epoch_loss
         else:
-            print(f"Skipping model save, loss increased from {prev_loss} to {epoch_loss}")
+            print("Skipping model save, loss increased from {} to {}".format(prev_loss, epoch_loss))
 
 train_unconditional()

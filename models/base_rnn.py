@@ -40,11 +40,11 @@ class BaseRNN(ABC):
 
     def save(self):
         self.model.save_weights(self.weights_path, overwrite=True)
-        print(f"Model weights saved to {self.weights_path}")
+        print("Model weights saved to {}".format(self.weights_path))
 
     def load(self):
         if os.path.exists(self.weights_path):
             self.model.load_weights(self.weights_path)
-            print(f"Model weights loaded from {self.weights_path}")
+            print("Model weights loaded from {}".format(self.weights_path))
         else:
             print("No model weights to load found")
