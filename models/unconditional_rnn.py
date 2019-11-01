@@ -98,7 +98,6 @@ class UnconditionalRNN(BaseRNN):
             inputs = outputs
 
         # remove first zeros
-        sample = sample[:,1:]
+        sample = sample[0,1:]
         plot_stroke(sample, save_name=filepath)
-        print(sample)
         return sample

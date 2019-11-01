@@ -25,4 +25,4 @@ def train_conditional(epochs=10, batch_size=32):
 
 
 if __name__=="__main__":
-    train_unconditional(epochs=80, batch_size=24)
+    train_unconditional(epochs=60, batch_size=24)
