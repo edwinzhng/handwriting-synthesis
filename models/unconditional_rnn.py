@@ -3,6 +3,9 @@ from pathlib import Path
 
 import numpy as np
 import tensorflow as tf
+import tensorflow_probability as tfp
+
+from utils import plot_stroke
 
 
 class UnconditionalRNN:
@@ -102,8 +105,39 @@ class UnconditionalRNN:
         self.optimizer.apply_gradients(zip(gradients, trainable_vars))
         return loss_value
 
-    def generate(self):
-        pass
+    def generate(self, max_timesteps=400, seed=None):
+        stroke = np.zeros((1, max_timesteps + 1, 3), dtype='float32')
+        for i in range(max_timesteps):
+            outputs = self.model(stroke[:,i:i+1,:])
+            end_stroke, mixture_weight, mean1, mean2, stddev1, stddev2, correl = self.output_vector(outputs)
+
+            # sample for MDN index from mixture weights
+            mixture_dist = tfp.distributions.Categorical(probs=mixture_weight[0,0])
+            mixture_idx = mixture_dist.sample()
+
+            # retrieve correct distribution values from mixture
+            mean1 = tf.gather(mean1, mixture_idx, axis=-1)
+            mean2 = tf.gather(mean2, mixture_idx, axis=-1)
+            stddev1 = tf.gather(stddev1, mixture_idx, axis=-1)
+            stddev2 = tf.gather(stddev2, mixture_idx, axis=-1)
+            correl = tf.gather(correl, mixture_idx, axis=-1)
+
+            # sample for x1, x2 offsets
+            cov_matrix = [[stddev1 * stddev1, correl * stddev1 * stddev2],
+                          [correl * stddev1 * stddev2, stddev2 * stddev2]]
+            bivariate_gaussian_dist = tfp.distributions.MultivariateNormalDiag(loc=[mean1, mean2], scale_diag=cov_matrix)
+            x1, x2 = bivariate_gaussian_dist.sample(seed=seed)[0]
+
+            # sample for end of stroke
+            bernoulli = tfp.distributions.Bernoulli(probs=end_stroke)
+            x3 = bernoulli.sample(1, seed=seed)
+            stroke[0,i+1] = [x1, x2, x3]
+            inputs = outputs
+
+        # remove first zeros
+        stroke = stroke[:,1:]
+        plot_stroke(stroke, save_name='samples/unconditional/generated.jpeg')
+        return stroke
 
     def save(self):
         self.model.save_weights(self.weights_path, overwrite=True)
