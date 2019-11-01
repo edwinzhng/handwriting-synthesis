@@ -6,26 +6,14 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 
 from utils import plot_stroke
+from models.base_rnn import BaseRNN
 
+np.set_printoptions(threshold=np.inf)
 
-class UnconditionalRNN:
-    def __init__(self, num_layers=3, num_cells=400, num_mixtures=20, lr=0.0001, gradient_clip=100):
-        self.input_size = 3
-        self.num_layers = num_layers
-        self.num_mixtures = num_mixtures
-        self.num_cells = num_cells
-        self.gradient_clip = gradient_clip
-        self.optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
-        self.initalizer = tf.keras.initializers.TruncatedNormal(stddev=0.075)
-        self.weights_path = "models/weights/unconditional.h5"
-
+class UnconditionalRNN(BaseRNN):
+    def __init__(self, *args, **kwargs):
+        super().__init__("models/weights/unconditional.h5", *args, **kwargs)
         self.build_model()
-
-    def lstm_layer(self, layer_inputs, input_shape):
-        return tf.keras.layers.LSTM(self.num_cells, input_shape=input_shape, return_sequences=True,
-                                    kernel_initializer=self.initalizer,
-                                    recurrent_initializer=self.initalizer,
-                                    use_bias=True, bias_initializer="zeros")(layer_inputs)
 
     def build_model(self):
         # input layer
@@ -50,10 +38,6 @@ class UnconditionalRNN:
         self.model = tf.keras.Model(inputs=self.inputs, outputs=self.outputs)
         self.model.summary()
 
-    # expands dims of coordinates for gaussian and loss calculations
-    def expand_dims(self, inputs, axis, num_dims):
-        return tf.concat([tf.expand_dims(inputs, axis) for _ in range(num_dims)], axis)
-
     # Equations (18 - 23)
     def output_vector(self, outputs):
         e_hat = outputs[:, :, 0]
@@ -71,21 +55,21 @@ class UnconditionalRNN:
         return [end_stroke, mixture_weight, mean1, mean2, stddev1, stddev2, correl]
 
     # Equation (24, 25)
-    def bivariate_gaussian(self, x1, x2, stddev1, stddev2, mean1, mean2, correl):
-        Z = tf.math.square((x1 - mean1) / stddev1) + tf.math.square((x2 - mean2) / stddev2) \
-            - (2 * correl * (x1 - mean1) * (x2 - mean2) / (stddev1 * stddev2))
+    def bivariate_gaussian(self, x, y, stddev1, stddev2, mean1, mean2, correl):
+        Z = tf.math.square((x - mean1) / stddev1) + tf.math.square((y - mean2) / stddev2) \
+            - (2 * correl * (x - mean1) * (y - mean2) / (stddev1 * stddev2))
         return tf.math.exp(-Z / (2 * (1 - tf.math.square(correl)))) \
             / (2 * np.pi * stddev1 * stddev2 * tf.math.sqrt(1 - tf.math.square(correl)))
 
     # Equation (26)
-    def loss(self, x1, x2, x3, mean1, mean2, stddev1, stddev2, correl, mixture_weight, end_stroke):
+    def loss(self, x, y, input_end, mean1, mean2, stddev1, stddev2, correl, mixture_weight, end_stroke):
         min_value = 1e-24 # required for logs to not be NaN when value is zero
-        gaussian = self.bivariate_gaussian(self.expand_dims(x1, -1, self.num_mixtures),
-                                           self.expand_dims(x2, -1, self.num_mixtures),
+        gaussian = self.bivariate_gaussian(self.expand_dims(x, -1, self.num_mixtures),
+                                           self.expand_dims(y, -1, self.num_mixtures),
                                            stddev1, stddev2, mean1, mean2, correl)
         gaussian_loss = tf.reduce_sum(tf.math.multiply(mixture_weight, gaussian), axis=-1, keepdims=True)
         gaussian_loss = -tf.math.log(tf.maximum(gaussian_loss, min_value))
-        bernoulli_loss = (end_stroke) * x3 + (1 - end_stroke) * (1 - x3)
+        bernoulli_loss = (end_stroke) * input_end + (1 - end_stroke) * (1 - input_end)
         bernoulli_loss = -tf.math.log(tf.maximum(bernoulli_loss, min_value))
         bernoulli_loss = self.expand_dims(bernoulli_loss, -1, 1)
         return tf.reduce_sum(gaussian_loss + bernoulli_loss)
@@ -95,8 +79,8 @@ class UnconditionalRNN:
         with tf.GradientTape() as tape:
             outputs = self.model(inputs)
             end_stroke, mixture_weight, mean1, mean2, stddev1, stddev2, correl = self.output_vector(outputs)
-            loss_value = self.loss(inputs[:,:,0], inputs[:,:,1], inputs[:,:,2],
-                                   mean1, mean2, stddev1, stddev2, correl, mixture_weight, end_stroke)
+            loss_value = self.loss(inputs[:,:,1], inputs[:,:,2], inputs[:,:,0], mean1, mean2,
+                                   stddev1, stddev2, correl, mixture_weight, end_stroke)
             loss_value /= (inputs.shape[0] * inputs.shape[1])
 
         trainable_vars = self.model.trainable_variables
@@ -106,9 +90,9 @@ class UnconditionalRNN:
         return loss_value
 
     def generate(self, max_timesteps=400, seed=None):
-        stroke = np.zeros((1, max_timesteps + 1, 3), dtype='float32')
+        sample = np.zeros((1, max_timesteps + 1, 3), dtype='float32')
         for i in range(max_timesteps):
-            outputs = self.model(stroke[:,i:i+1,:])
+            outputs = self.model(sample[:,i:i+1,:])
             end_stroke, mixture_weight, mean1, mean2, stddev1, stddev2, correl = self.output_vector(outputs)
 
             # sample for MDN index from mixture weights
@@ -122,30 +106,21 @@ class UnconditionalRNN:
             stddev2 = tf.gather(stddev2, mixture_idx, axis=-1)
             correl = tf.gather(correl, mixture_idx, axis=-1)
 
-            # sample for x1, x2 offsets
+            # sample for x, y offsets
             cov_matrix = [[stddev1 * stddev1, correl * stddev1 * stddev2],
                           [correl * stddev1 * stddev2, stddev2 * stddev2]]
             bivariate_gaussian_dist = tfp.distributions.MultivariateNormalDiag(loc=[mean1, mean2], scale_diag=cov_matrix)
-            x1, x2 = bivariate_gaussian_dist.sample(seed=seed)[0]
+            x, y = bivariate_gaussian_dist.sample(seed=seed)[0]
 
             # sample for end of stroke
             bernoulli = tfp.distributions.Bernoulli(probs=end_stroke)
-            x3 = bernoulli.sample(1, seed=seed)
-            stroke[0,i+1] = [x1, x2, x3]
+            end_cur_stroke = bernoulli.sample(1, seed=seed)
+
+            sample[0,i+1] = [end_cur_stroke, x, y]
             inputs = outputs
 
         # remove first zeros
-        stroke = stroke[:,1:]
-        plot_stroke(stroke, save_name='samples/unconditional/generated.jpeg')
-        return stroke
-
-    def save(self):
-        self.model.save_weights(self.weights_path, overwrite=True)
-        print(f"Model weights saved to {self.weights_path}")
-
-    def load(self):
-        if os.path.exists(self.weights_path):
-            self.model.load_weights(self.weights_path)
-            print(f"Model weights loaded from {self.weights_path}")
-        else:
-            print("No model weights to load found")
+        sample = sample[:,1:]
+        plot_stroke(sample, save_name='samples/unconditional/generated.jpeg')
+        tf.print(sample, summarize=-1)
+        return sample
