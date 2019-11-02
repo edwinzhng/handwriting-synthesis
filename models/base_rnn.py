@@ -13,16 +13,14 @@ class BaseRNN():
                  weights_path,
                  num_mixtures=20,
                  num_cells=400,
-                 lr=0.001,
                  gradient_clip=10):
         self.input_size = 3
+        self.num_layers = 3
         self.params_per_mixture = 6
         self.num_cells = 400
         self.num_mixtures = num_mixtures
         self.num_cells = num_cells
         self.gradient_clip = gradient_clip
-        self.optimizer = tf.keras.optimizers.RMSprop(learning_rate=lr, rho=0.95,
-                                                     momentum=0.9, epsilon=0.001)
         self.weights_path = weights_path
 
         self.train_loss = tf.keras.metrics.Mean('train_loss', dtype=tf.float32)
@@ -75,8 +73,10 @@ class BaseRNN():
         else:
             print("No model weights to load found")
 
-    def train(self, epochs=50, batch_size=64):
+    def train(self, epochs=50, batch_size=64, learning_rate=0.0001):
         self.build_model(batch_size=batch_size)
+        self.optimizer = tf.keras.optimizers.RMSprop(learning_rate=learning_rate, rho=0.95,
+                                                     momentum=0.9, epsilon=0.0001)
         self.model.summary()
         dataloader = Dataloader(batch_size=batch_size)
 

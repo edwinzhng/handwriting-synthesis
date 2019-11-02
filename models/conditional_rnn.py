@@ -15,28 +15,20 @@ class ConditionalRNN(BaseRNN):
         self.gaussian_functions = 10
 
     def build_model(self, batch_size):
-        self.inputs = tf.keras.Input(shape=(None, self.input_size), batch_size=batch_size)
-        self.inputs = tf.keras.Input(shape=(None, self.input_size), batch_size=batch_size)
+        inputs = tf.keras.Input(shape=(None, self.input_size), batch_size=batch_size)
+        window_inputs = tf.keras.Input(shape=(None, self.input_size), batch_size=batch_size)
 
-        rnns = []
-        lstm_states = []
-        x = self.lstm_layer(self.inputs, (batch_size, None, self.input_size))
-        window = tf.keras.layers.Dense(self.num_cells,
-                                       3 * self.gaussian_functions)()
+        lstm_1 = self.lstm_layer((batch_size, None, self.input_size))(inputs)
+        skip = tf.keras.layers.concatenate([inputs, lstm_1])
+        lstm_2 = self.lstm_layer((None, self.num_cells + self.input_size))(skip)
+        skip = tf.keras.layers.concatenate([inputs, lstm_2])
+        lstm_3 = self.lstm_layer((None, self.num_cells + self.input_size))(skip)
 
-        rnns.append(x)
-        for i in range(self.num_layers - 1):
-            output_rnn = tf.keras.layers.concatenate([self.inputs, x])
-            x = self.lstm_layer(output_rnn, (None, self.num_cells + self.input_size))
-            rnns.append(x)
+        skip = tf.keras.layers.concatenate([lstm_1, lstm_2, lstm_3])
+        outputs = tf.keras.layers.Dense(self.params_per_mixture * self.num_mixtures + 1,
+                                             input_shape=(self.num_layers * self.num_cells,))(skip)
 
-        # two-dimensional mean and standard deviation, scalar correlation, weights
-        params_per_mixture = 6
-        output_rnn = tf.keras.layers.concatenate([rnn for rnn in rnns]) # output skip connections
-        self.outputs = tf.keras.layers.Dense(params_per_mixture * self.num_mixtures + 1,
-                                             input_shape=(self.num_layers * self.num_cells,))(output_rnn)
-
-        self.model = tf.keras.Model(inputs=self.inputs, outputs=self.outputs)
+        self.model = tf.keras.Model(inputs=[inputs, window_inputs], outputs=outputs)
         self.load()
 
     def loss(self, x, y, input_end, mean1, mean2, stddev1, stddev2, correl, mixture_weight, end_stroke):

@@ -13,7 +13,7 @@ class UnconditionalRNN(BaseRNN):
     def __init__(self, *args, **kwargs):
         super().__init__("models/weights/unconditional.h5", *args, **kwargs)
 
-    def build_model(self, batch_size, num_layers=3):
+    def build_model(self, batch_size):
         inputs = tf.keras.Input(shape=(None, self.input_size), batch_size=batch_size)
 
         lstm_1 = self.lstm_layer((batch_size, None, self.input_size))(inputs)
@@ -24,7 +24,7 @@ class UnconditionalRNN(BaseRNN):
 
         skip = tf.keras.layers.concatenate([lstm_1, lstm_2, lstm_3])
         outputs = tf.keras.layers.Dense(self.params_per_mixture * self.num_mixtures + 1,
-                                             input_shape=(num_layers * self.num_cells,))(skip)
+                                             input_shape=(self.num_layers * self.num_cells,))(skip)
 
         self.model = tf.keras.Model(inputs=inputs, outputs=outputs)
         self.load()

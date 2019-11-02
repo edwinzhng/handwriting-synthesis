@@ -3,3 +3,4 @@ admin/*
 __pycache__
 notebooks/.ipynb_checkpoints/*
 .DS_STORE
+logs/
