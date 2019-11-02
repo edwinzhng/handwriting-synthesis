@@ -109,7 +109,7 @@ class BaseRNN():
                 self.build_model(batch_size=batch_size)
                 prev_loss = self.train_loss.result()
             else:
-                print("Skipping model save, loss increased from {} to {}".format(prev_loss, train_loss))
+                print("Skipping save, loss increased from {} to {}".format(prev_loss, self.train_loss.result()))
 
             # log metrics
             with train_summary_writer.as_default():
