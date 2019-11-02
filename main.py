@@ -1,28 +1,32 @@
+import argparse
+
 import numpy as np
 
 from models.conditional_rnn import ConditionalRNN
 from models.unconditional_rnn import UnconditionalRNN
 
 
-def generate_unconditionally(random_seed=1):
+def generate_unconditionally(random_seed=None, filepath=None):
     model = UnconditionalRNN()
-    return model.generate()
+    return model.generate(seed=random_seed, filepath=None)
 
-def generate_conditionally(text='welcome to lyrebird', random_seed=1):
+def generate_conditionally(text='welcome to lyrebird', random_seed=None, filepath=None):
     model = ConditionalRNN()
     return model.generate()
 
 def recognize_stroke(stroke):
     return 'welcome to lyrebird'
 
-def train_unconditional(epochs=10, batch_size=32):
-    model = UnconditionalRNN()
-    model.train(epochs, batch_size)
-
-def train_conditional(epochs=10, batch_size=32):
-    model = ConditionalRNN(batch_size)
-    model.train(epochs, batch_size)
-
 
 if __name__=="__main__":
-    train_unconditional(epochs=60, batch_size=24)
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--model', '-m', type=str, choices=['conditional', 'unconditional'], help='model type')
+    parser.add_argument('--seed', '-s', type=int, default=None, help='random seed')
+    parser.add_argument('--filepath', '-f', type=str, default=None, help='file path to save generated image')
+    parser.add_argument('--text', '-t', type=str, default='', help='text for conditional generation')
+    args = parser.parse_args()
+
+    if args.model == 'unconditional':
+        generate_unconditionally(args.seed, args.filepath)
+    else:
+        generate_conditionally(args.text, args.seed, args.filepath)

@@ -37,12 +37,11 @@ class UnconditionalRNN(BaseRNN):
     # Equation (26)
     def loss(self, x, y, input_end, mean1, mean2, stddev1, stddev2, correl, mixture_weight, end_stroke):
         epsilon = 1e-10 # required for logs to not be NaN when value is zero
-        gaussian = self.bivariate_gaussian(self.expand_dims(x, -1, self.num_mixtures),
-                                           self.expand_dims(y, -1, self.num_mixtures),
-                                           stddev1, stddev2, mean1, mean2, correl)
-        gaussian_loss = tf.reduce_sum(tf.math.multiply(mixture_weight, gaussian), axis=-1)
+        gaussian = mixture_weight * self.bivariate_gaussian(self.expand_dims(x, -1, self.num_mixtures),
+                                                            self.expand_dims(y, -1, self.num_mixtures),
+                                                            stddev1, stddev2, mean1, mean2, correl)
+        gaussian_loss = tf.reduce_sum(gaussian, axis=-1)
         gaussian_loss = tf.math.log(tf.maximum(gaussian_loss, epsilon))
-
         bernoulli_loss = tf.where(tf.math.equal(tf.ones_like(input_end), input_end), end_stroke, 1 - end_stroke)
         bernoulli_loss = tf.math.log(tf.maximum(bernoulli_loss, epsilon))
         return tf.reduce_sum(tf.math.negative(gaussian_loss + bernoulli_loss))
@@ -65,7 +64,7 @@ class UnconditionalRNN(BaseRNN):
             self.optimizer.apply_gradients(zip(gradients, trainable_vars))
         return loss_value
 
-    def generate(self, max_timesteps=400, seed=None, filepath='samples/unconditional/generated.jpeg'):
+    def generate(self, max_timesteps=800, seed=None, filepath='samples/unconditional/generated.jpeg'):
         self.build_model(batch_size=1)
         self.model.reset_states()
         sample = np.zeros((1, max_timesteps + 1, 3), dtype='float32')
@@ -75,7 +74,7 @@ class UnconditionalRNN(BaseRNN):
 
             # sample for MDN index from mixture weights
             mixture_dist = tfp.distributions.Categorical(probs=mixture_weight[0,0])
-            mixture_idx = mixture_dist.sample()
+            mixture_idx = mixture_dist.sample(seed=seed)
 
             # retrieve correct distribution values from mixture
             mean1 = tf.gather(mean1, mixture_idx, axis=-1)

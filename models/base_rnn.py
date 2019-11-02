@@ -14,7 +14,7 @@ class BaseRNN(ABC):
                  num_layers=3,
                  num_mixtures=20,
                  num_cells=400,
-                 lr=0.0001,
+                 lr=0.001,
                  gradient_clip=100):
         self.input_size = 3
         self.num_layers = num_layers
@@ -58,7 +58,7 @@ class BaseRNN(ABC):
     # Equations (18 - 23)
     def output_vector(self, outputs):
         e_hat = outputs[:, :, 0]
-        pi_hat, mu_hat1, mu_hat2, sigma_hat1, sigma_hat2, rho_hat = tf.split(outputs[:, :, 1:], 6, 2)
+        pi_hat, mu_hat1, mu_hat2, sigma_hat1, sigma_hat2, rho_hat = tf.split(outputs[:, :, 1:], 6, -1)
 
         # calculate actual values
         end_stroke = tf.math.sigmoid(e_hat)
@@ -125,7 +125,7 @@ class BaseRNN(ABC):
         batches = tqdm(dataloader.valid_dataset, total=dataloader.num_valid_batches,
                        leave=True, desc="Validation")
         for batch in batches:
-            loss = self.train_step(batch, update_gradients=False)
+            loss = self.train_step(batch)
             valid_losses.append(loss)
             batches.set_description("Validation Loss: {:.6f}".format(np.mean(valid_losses)))
 

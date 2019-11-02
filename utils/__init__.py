@@ -19,7 +19,7 @@ def plot_stroke(stroke, save_name=None):
 
     for cut_value in cuts:
         ax.plot(x[start:cut_value], y[start:cut_value],
-                'k-', linewidth=3)
+                'k-', linewidth=1)
         start = cut_value + 1
     ax.axis('equal')
     ax.axes.get_xaxis().set_visible(False)
