@@ -1,5 +1,5 @@
+import datetime
 import os
-from abc import ABC, abstractmethod
 
 import numpy as np
 import tensorflow as tf
@@ -8,48 +8,34 @@ from tqdm import tqdm
 from utils.data import Dataloader
 
 
-class BaseRNN(ABC):
+class BaseRNN():
     def __init__(self,
                  weights_path,
-                 num_layers=3,
                  num_mixtures=20,
                  num_cells=400,
                  lr=0.001,
-                 gradient_clip=100):
+                 gradient_clip=10):
         self.input_size = 3
-        self.num_layers = num_layers
+        self.params_per_mixture = 6
+        self.num_cells = 400
         self.num_mixtures = num_mixtures
         self.num_cells = num_cells
         self.gradient_clip = gradient_clip
-        self.optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
-        self.initalizer = tf.keras.initializers.TruncatedNormal(stddev=0.075)
+        self.optimizer = tf.keras.optimizers.RMSprop(learning_rate=lr, rho=0.95,
+                                                     momentum=0.9, epsilon=0.001)
         self.weights_path = weights_path
 
-    @abstractmethod
-    def build_model(self):
-        pass
+        self.train_loss = tf.keras.metrics.Mean('train_loss', dtype=tf.float32)
+        self.validation_loss = tf.keras.metrics.Mean('validation_loss', dtype=tf.float32)
+        self.gradient_norm = tf.keras.metrics.Mean('gradient_norm', dtype=tf.float32)
 
-    @abstractmethod
-    def loss(self):
-        pass
-
-    @abstractmethod
-    def train_step(self):
-        pass
-
-    @abstractmethod
-    def generate(self):
-        pass
-
-    def lstm_layer(self, layer_inputs, input_shape, stateful=True):
+    def lstm_layer(self, input_shape, stateful=True):
         return tf.keras.layers.LSTM(self.num_cells,
                                     input_shape=input_shape,
                                     stateful=stateful,
                                     return_sequences=True,
-                                    kernel_initializer=self.initalizer,
-                                    recurrent_initializer=self.initalizer,
                                     use_bias=True,
-                                    bias_initializer="zeros")(layer_inputs)
+                                    bias_initializer="zeros")
 
     # expands dims of coordinates for gaussian and loss calculations
     def expand_dims(self, inputs, axis, num_dims):
@@ -89,44 +75,56 @@ class BaseRNN(ABC):
         else:
             print("No model weights to load found")
 
-    def train(self, epochs=10, batch_size=32):
+    def train(self, epochs=50, batch_size=64):
         self.build_model(batch_size=batch_size)
         self.model.summary()
         dataloader = Dataloader(batch_size=batch_size)
-        train_loss = float('inf')
+
+        current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        train_log_dir = 'logs/log_' + current_time + '/train'
+        train_summary_writer = tf.summary.create_file_writer(train_log_dir)
+
         prev_loss = float('inf')
 
         print("Training model...")
         for epoch in range(epochs):
             dataloader.load_datasets()
-            train_losses = []
             batches = tqdm(dataloader.train_dataset, total=dataloader.num_train_batches,
                             leave=True, desc="Epoch: {}/{}".format(epoch + 1, epochs))
             for batch in batches:
-                loss = self.train_step(batch)
-                train_losses.append(loss)
-                train_loss = np.mean(train_losses)
-                batches.set_description("Epoch: {}/{}, Loss: {:.6f}".format(epoch + 1, epochs, train_loss))
+                loss, gradients = self.train_step(batch)
+                self.train_loss(loss)
+                self.gradient_norm(tf.linalg.global_norm(gradients))
+                batches.set_description("Epoch: {}/{}, Loss: {:.6f}".format(epoch + 1, epochs,
+                                                                            self.train_loss.result()))
 
-            validation_loss = self.validation(dataloader, batch_size)
+            self.validation(dataloader, batch_size)
+
             print("Finished Epoch {} with training loss {:.6f} and validation loss {:.6f}".format(
-                  epoch + 1, train_loss, validation_loss))
+                  epoch + 1, self.train_loss.result(), self.validation_loss.result()))
 
-            if train_loss < prev_loss:
+            if self.train_loss.result() < prev_loss:
                 self.save()
                 self.generate()
                 self.build_model(batch_size=batch_size)
-                prev_loss = train_loss
+                prev_loss = self.train_loss.result()
             else:
                 print("Skipping model save, loss increased from {} to {}".format(prev_loss, train_loss))
 
+            # log metrics
+            with train_summary_writer.as_default():
+                tf.summary.scalar('train_loss', self.train_loss.result(), step=epoch)
+                tf.summary.scalar('validation_loss', self.validation_loss.result(), step=epoch)
+                tf.summary.scalar('gradient', self.gradient_norm.result(), step=epoch)
+
+            self.train_loss.reset_states()
+            self.validation_loss.reset_states()
+            self.gradient_norm.reset_states()
+
     def validation(self, dataloader, batch_size=32):
-        valid_losses = []
         batches = tqdm(dataloader.valid_dataset, total=dataloader.num_valid_batches,
                        leave=True, desc="Validation")
         for batch in batches:
-            loss = self.train_step(batch)
-            valid_losses.append(loss)
-            batches.set_description("Validation Loss: {:.6f}".format(np.mean(valid_losses)))
-
-        return np.mean(valid_losses)
+            loss, _ = self.train_step(batch, update_gradients=False)
+            self.validation_loss(loss)
+            batches.set_description("Validation Loss: {:.6f}".format(self.validation_loss.result()))

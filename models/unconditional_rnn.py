@@ -5,33 +5,28 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 
-from utils import plot_stroke
 from models.base_rnn import BaseRNN
+from utils import plot_stroke
+
 
 class UnconditionalRNN(BaseRNN):
     def __init__(self, *args, **kwargs):
         super().__init__("models/weights/unconditional.h5", *args, **kwargs)
 
-    def build_model(self, batch_size):
-        self.inputs = tf.keras.Input(shape=(None, self.input_size), batch_size=batch_size)
+    def build_model(self, batch_size, num_layers=3):
+        inputs = tf.keras.Input(shape=(None, self.input_size), batch_size=batch_size)
 
-        # build RNN layers with skip connections to input
-        rnns = []
-        lstm_states = []
-        x = self.lstm_layer(self.inputs, (batch_size, None, self.input_size))
-        rnns.append(x)
-        for i in range(self.num_layers - 1):
-            output_rnn = tf.keras.layers.concatenate([self.inputs, x])
-            x = self.lstm_layer(output_rnn, (None, self.num_cells + self.input_size))
-            rnns.append(x)
+        lstm_1 = self.lstm_layer((batch_size, None, self.input_size))(inputs)
+        skip = tf.keras.layers.concatenate([inputs, lstm_1])
+        lstm_2 = self.lstm_layer((None, self.num_cells + self.input_size))(skip)
+        skip = tf.keras.layers.concatenate([inputs, lstm_2])
+        lstm_3 = self.lstm_layer((None, self.num_cells + self.input_size))(skip)
 
-        # two-dimensional mean and standard deviation, scalar correlation, weights
-        params_per_mixture = 6
-        output_rnn = tf.keras.layers.concatenate([rnn for rnn in rnns]) # output skip connections
-        self.outputs = tf.keras.layers.Dense(params_per_mixture * self.num_mixtures + 1,
-                                             input_shape=(self.num_layers * self.num_cells,))(output_rnn)
+        skip = tf.keras.layers.concatenate([lstm_1, lstm_2, lstm_3])
+        outputs = tf.keras.layers.Dense(self.params_per_mixture * self.num_mixtures + 1,
+                                             input_shape=(num_layers * self.num_cells,))(skip)
 
-        self.model = tf.keras.Model(inputs=self.inputs, outputs=self.outputs)
+        self.model = tf.keras.Model(inputs=inputs, outputs=outputs)
         self.load()
 
     # Equation (26)
@@ -44,7 +39,7 @@ class UnconditionalRNN(BaseRNN):
         gaussian_loss = tf.math.log(tf.maximum(gaussian_loss, epsilon))
         bernoulli_loss = tf.where(tf.math.equal(tf.ones_like(input_end), input_end), end_stroke, 1 - end_stroke)
         bernoulli_loss = tf.math.log(tf.maximum(bernoulli_loss, epsilon))
-        return tf.reduce_sum(tf.math.negative(gaussian_loss + bernoulli_loss))
+        return tf.reduce_sum(tf.math.negative(gaussian_loss + bernoulli_loss), axis=1)
 
     @tf.function
     def train_step(self, inputs, update_gradients=True):
@@ -52,19 +47,19 @@ class UnconditionalRNN(BaseRNN):
         with tf.GradientTape() as tape:
             outputs = self.model(inputs)
             end_stroke, mixture_weight, mean1, mean2, stddev1, stddev2, correl = self.output_vector(outputs)
-            loss_value = self.loss(inputs[:,:,1], inputs[:,:,2], inputs[:,:,0], mean1, mean2,
-                                   stddev1, stddev2, correl, mixture_weight, end_stroke)
-            # divide by batch size
-            loss_value /= inputs.shape[0]
+            loss = tf.reduce_mean(self.loss(inputs[:,:,1], inputs[:,:,2], inputs[:,:,0], mean1, mean2,
+                                                  stddev1, stddev2, correl, mixture_weight, end_stroke)) / 800
+
+        trainable_vars = self.model.trainable_variables
+        gradients = tape.gradient(loss, trainable_vars)
+        gradients, _ = tf.clip_by_global_norm(gradients, self.gradient_clip)
 
         if update_gradients:
-            trainable_vars = self.model.trainable_variables
-            gradients = tape.gradient(loss_value, trainable_vars)
-            gradients, _ = tf.clip_by_global_norm(gradients, self.gradient_clip)
             self.optimizer.apply_gradients(zip(gradients, trainable_vars))
-        return loss_value
 
-    def generate(self, max_timesteps=800, seed=None, filepath='samples/unconditional/generated.jpeg'):
+        return loss, gradients
+
+    def generate(self, max_timesteps=600, seed=None, filepath='samples/unconditional/generated.jpeg'):
         self.build_model(batch_size=1)
         self.model.reset_states()
         sample = np.zeros((1, max_timesteps + 1, 3), dtype='float32')
