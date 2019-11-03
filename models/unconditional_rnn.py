@@ -13,14 +13,14 @@ class UnconditionalRNN(BaseRNN):
     def __init__(self, *args, **kwargs):
         super().__init__('unconditional', *args, **kwargs)
 
-    def build_model(self, batch_size):
+    def build_model(self, batch_size=None, stateful=False):
         inputs = tf.keras.Input(shape=(None, self.input_size), batch_size=batch_size)
 
-        lstm_1 = self.lstm_layer((batch_size, None, self.input_size))(inputs)
+        lstm_1 = self.lstm_layer((batch_size, None, self.input_size), stateful=stateful)(inputs)
         skip = tf.keras.layers.concatenate([inputs, lstm_1])
-        lstm_2 = self.lstm_layer((None, self.num_cells + self.input_size))(skip)
+        lstm_2 = self.lstm_layer((None, self.num_cells + self.input_size), stateful=stateful)(skip)
         skip = tf.keras.layers.concatenate([inputs, lstm_2])
-        lstm_3 = self.lstm_layer((None, self.num_cells + self.input_size))(skip)
+        lstm_3 = self.lstm_layer((None, self.num_cells + self.input_size), stateful=stateful)(skip)
 
         skip = tf.keras.layers.concatenate([lstm_1, lstm_2, lstm_3])
         outputs = tf.keras.layers.Dense(self.params_per_mixture * self.num_mixtures + 1,
@@ -43,7 +43,6 @@ class UnconditionalRNN(BaseRNN):
 
     @tf.function
     def train_step(self, inputs, update_gradients=True):
-        self.model.reset_states()
         with tf.GradientTape() as tape:
             outputs = self.model(inputs)
             end_stroke, mixture_weight, mean1, mean2, stddev1, stddev2, correl = self.output_vector(outputs)
@@ -60,8 +59,7 @@ class UnconditionalRNN(BaseRNN):
         return loss, gradients
 
     def generate(self, max_timesteps=400, seed=None, filepath='samples/unconditional/generated.jpeg'):
-        self.build_model(batch_size=1)
-        self.model.reset_states()
+        self.build_model(batch_size=1, stateful=True)
         sample = np.zeros((1, max_timesteps + 1, 3), dtype='float32')
         for i in range(max_timesteps):
             outputs = self.model(sample[:,i:i+1,:])

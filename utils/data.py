@@ -9,7 +9,7 @@ class Dataloader:
                  batch_size=32,
                  train_split=0.95,
                  buffer_size=100,
-                 drop_remainder=True,
+                 drop_remainder=False,
                  max_sequence_length=800):
         self.batch_size = batch_size
         self.train_split = train_split

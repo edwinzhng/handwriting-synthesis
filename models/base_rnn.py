@@ -28,7 +28,7 @@ class BaseRNN():
         self.validation_loss = tf.keras.metrics.Mean('validation_loss', dtype=tf.float32)
         self.gradient_norm = tf.keras.metrics.Mean('gradient_norm', dtype=tf.float32)
 
-    def lstm_layer(self, input_shape, stateful=True):
+    def lstm_layer(self, input_shape, stateful=False):
         return tf.keras.layers.LSTM(self.num_cells,
                                     input_shape=input_shape,
                                     stateful=stateful,
@@ -87,7 +87,7 @@ class BaseRNN():
         train_log_dir = 'logs/{}_{}/train'.format(self.name, current_time)
         train_summary_writer = tf.summary.create_file_writer(train_log_dir)
 
-        prev_loss = float('inf')
+        best_loss = float('inf')
 
         print('Training model...')
         for epoch in range(epochs):
@@ -106,16 +106,22 @@ class BaseRNN():
             print('Finished Epoch {} with training loss {:.6f} and validation loss {:.6f}'.format(
                   epoch + 1, self.train_loss.result(), self.validation_loss.result()))
 
-            if self.train_loss.result() < prev_loss:
+            if self.validation_loss.result() < best_loss:
                 self.save('_best')
-                self.build_model(batch_size=batch_size)
-                prev_loss = self.train_loss.result()
+                best_loss = self.validation_loss.result()
                 print('Saving new best model')
-                self.generate(filepath='samples/{}/generated_best.jpeg'.format(self.name))
 
+            generated = False
             if epoch % epochs_per_save == 0:
-                self.save('_epoch_{}'.format(epoch + 1))
-                self.generate(filepath='samples/{}/epoch_{}.jpeg'.format(self.name, epoch + 1))
+                self.generate(filepath='samples/{}/generated_{}.jpeg'.format(self.name, epoch))
+                generated = True
+
+            if self.validation_loss.result() < best_loss:
+                self.generate(filepath='samples/{}/generated_best.jpeg'.format(self.name))
+                generated = True
+            
+            if generated:
+                self.build_model()
 
             # log metrics
             with train_summary_writer.as_default():

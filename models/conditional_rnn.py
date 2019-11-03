@@ -15,18 +15,18 @@ class ConditionalRNN(BaseRNN):
         self.window_gaussians = 10
         self.kappa_prev = 0.0
 
-    def build_model(self, batch_size):
+    def build_model(self, batch_size=None, stateful=False):
         inputs = tf.keras.Input(shape=(None, self.input_size), batch_size=batch_size)
         window_inputs = tf.keras.Input(shape=(None, self.input_size), batch_size=batch_size)
 
-        lstm_1 = self.lstm_layer((batch_size, None, self.input_size))(inputs)
+        lstm_1 = self.lstm_layer((batch_size, None, self.input_size), stateful=stateful)(inputs)
         window = tf.keras.layers.Dense(3 * self.window_gaussians, input_shape=(None, self.num_cells))
         w, kappa, phi = self.process_window(window)
 
         skip = tf.keras.layers.concatenate([inputs, lstm_1, w])
-        lstm_2 = self.lstm_layer((None, self.num_cells + self.input_size))(skip)
+        lstm_2 = self.lstm_layer((None, self.num_cells + self.input_size), stateful=stateful)(skip)
         skip = tf.keras.layers.concatenate([inputs, lstm_2])
-        lstm_3 = self.lstm_layer((None, self.num_cells + self.input_size))(skip)
+        lstm_3 = self.lstm_layer((None, self.num_cells + self.input_size), stateful=stateful)(skip)
 
         skip = tf.keras.layers.concatenate([lstm_1, lstm_2, lstm_3])
         outputs = tf.keras.layers.Dense(self.params_per_mixture * self.num_mixtures + 1,
@@ -58,5 +58,6 @@ class ConditionalRNN(BaseRNN):
     def train_step(self, inputs):
         pass
 
-    def generate(self, max_timesteps=400, seed=None, filepath='samples/conditional/generated.jpeg'):
-        pass
+    def generate(self, text, max_timesteps=400, seed=None, filepath='samples/conditional/generated.jpeg'):
+        self.build_model(batch_size=1, stateful=True)
+        sample = np.zeros((1, max_timesteps + 1, 3), dtype='float32')
