@@ -33,7 +33,7 @@ class ConditionalRNN(BaseRNN):
                                              input_shape=(self.num_layers * self.num_cells,))(skip)
 
         self.model = tf.keras.Model(inputs=[inputs, window_inputs], outputs=outputs)
-        self.load()
+        self.load('_best')
 
     def process_window(self, window_outputs):
         alpha_hat, beta_hat, kappa_hat = tf.split(window_outputs, 3, -1)

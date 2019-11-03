@@ -68,9 +68,8 @@ class BaseRNN():
         self.model.save_weights(filepath, overwrite=True)
         print('Model weights saved to {}'.format(filepath))
 
-    def load(self):
-        filepath = '{}/{}.h5'.format(self.weights_path, self.name)
-        print(filepath)
+    def load(self, suffix=''):
+        filepath = '{}/{}{}.h5'.format(self.weights_path, self.name, suffix)
         try:
             self.model.load_weights(filepath)
             print('Model weights loaded from {}'.format(filepath))
@@ -107,16 +106,16 @@ class BaseRNN():
             print('Finished Epoch {} with training loss {:.6f} and validation loss {:.6f}'.format(
                   epoch + 1, self.train_loss.result(), self.validation_loss.result()))
 
-            if epoch % epochs_per_save == 0:
-                self.save('_epoch_{}'.format(epoch))
-                self.generate(filepath='samples/{}/epoch_{}.jpeg'.format(self.name, epoch))
-
             if self.train_loss.result() < prev_loss:
-                self.save()
+                self.save('_best')
                 self.build_model(batch_size=batch_size)
                 prev_loss = self.train_loss.result()
                 print('Saving new best model')
                 self.generate(filepath='samples/{}/generated_best.jpeg'.format(self.name))
+
+            if epoch % epochs_per_save == 0:
+                self.save('_epoch_{}'.format(epoch + 1))
+                self.generate(filepath='samples/{}/epoch_{}.jpeg'.format(self.name, epoch + 1))
 
             # log metrics
             with train_summary_writer.as_default():
