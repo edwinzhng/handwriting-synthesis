@@ -22,7 +22,7 @@ class UnconditionalRNN(BaseRNN):
         skip = tf.keras.layers.concatenate([inputs, lstm_2])
         lstm_3 = self.lstm_layer((None, self.num_cells + self.input_size))(skip)
 
-        skip = tf.keras.layers.concatenate([lstm_1, lstm_2])
+        skip = tf.keras.layers.concatenate([lstm_1, lstm_2, lstm_3])
         outputs = tf.keras.layers.Dense(self.params_per_mixture * self.num_mixtures + 1,
                                              input_shape=(self.num_layers * self.num_cells,))(skip)
 
