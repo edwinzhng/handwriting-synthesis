@@ -10,7 +10,7 @@ from utils.data import Dataloader
 
 class BaseRNN():
     def __init__(self,
-                 weights_path,
+                 name,
                  num_mixtures=20,
                  num_cells=400,
                  gradient_clip=10):
@@ -21,7 +21,8 @@ class BaseRNN():
         self.num_mixtures = num_mixtures
         self.num_cells = num_cells
         self.gradient_clip = gradient_clip
-        self.weights_path = weights_path
+        self.name = name
+        self.weights_path = 'models/weights'
 
         self.train_loss = tf.keras.metrics.Mean('train_loss', dtype=tf.float32)
         self.validation_loss = tf.keras.metrics.Mean('validation_loss', dtype=tf.float32)
@@ -33,7 +34,7 @@ class BaseRNN():
                                     stateful=stateful,
                                     return_sequences=True,
                                     use_bias=True,
-                                    bias_initializer="zeros")
+                                    bias_initializer='zeros')
 
     # expands dims of coordinates for gaussian and loss calculations
     def expand_dims(self, inputs, axis, num_dims):
@@ -62,54 +63,60 @@ class BaseRNN():
         return tf.math.exp(-Z / (2 * (1 - tf.math.square(correl)))) \
             / (2 * np.pi * stddev1 * stddev2 * tf.math.sqrt(1 - tf.math.square(correl)))
 
-    def save(self):
-        self.model.save_weights(self.weights_path, overwrite=True)
-        print("Model weights saved to {}".format(self.weights_path))
+    def save(self, suffix=''):
+        filepath = '{}/{}{}.h5'.format(self.weights_path, self.name, suffix)
+        self.model.save_weights(filepath, overwrite=True)
+        print('Model weights saved to {}'.format(filepath))
 
     def load(self):
-        if os.path.exists(self.weights_path):
-            self.model.load_weights(self.weights_path)
-            print("Model weights loaded from {}".format(self.weights_path))
-        else:
-            print("No model weights to load found")
+        filepath = '{}/{}.h5'.format(self.weights_path, self.name)
+        print(filepath)
+        try:
+            self.model.load_weights(filepath)
+            print('Model weights loaded from {}'.format(filepath))
+        except:
+            print('Could not load weights from {}'.format(filepath))
 
-    def train(self, epochs=50, batch_size=64, learning_rate=0.0001):
+    def train(self, epochs=50, batch_size=64, learning_rate=0.0001, epochs_per_save=10):
         self.build_model(batch_size=batch_size)
         self.optimizer = tf.keras.optimizers.RMSprop(learning_rate=learning_rate, rho=0.95,
                                                      momentum=0.9, epsilon=0.0001)
         self.model.summary()
         dataloader = Dataloader(batch_size=batch_size)
 
-        current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        train_log_dir = 'logs/log_' + current_time + '/train'
+        current_time = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+        train_log_dir = 'logs/{}_{}/train'.format(self.name, current_time)
         train_summary_writer = tf.summary.create_file_writer(train_log_dir)
 
         prev_loss = float('inf')
 
-        print("Training model...")
+        print('Training model...')
         for epoch in range(epochs):
             dataloader.load_datasets()
             batches = tqdm(dataloader.train_dataset, total=dataloader.num_train_batches,
-                            leave=True, desc="Epoch: {}/{}".format(epoch + 1, epochs))
+                            leave=True, desc='Epoch: {}/{}'.format(epoch + 1, epochs))
             for batch in batches:
                 loss, gradients = self.train_step(batch)
                 self.train_loss(loss)
                 self.gradient_norm(tf.linalg.global_norm(gradients))
-                batches.set_description("Epoch: {}/{}, Loss: {:.6f}".format(epoch + 1, epochs,
+                batches.set_description('Epoch: {}/{}, Loss: {:.6f}'.format(epoch + 1, epochs,
                                                                             self.train_loss.result()))
 
             self.validation(dataloader, batch_size)
 
-            print("Finished Epoch {} with training loss {:.6f} and validation loss {:.6f}".format(
+            print('Finished Epoch {} with training loss {:.6f} and validation loss {:.6f}'.format(
                   epoch + 1, self.train_loss.result(), self.validation_loss.result()))
+
+            if epoch % epochs_per_save == 0:
+                self.save('_epoch_{}'.format(epoch))
+                self.generate(filepath='samples/{}/epoch_{}.jpeg'.format(self.name, epoch))
 
             if self.train_loss.result() < prev_loss:
                 self.save()
-                self.generate()
                 self.build_model(batch_size=batch_size)
                 prev_loss = self.train_loss.result()
-            else:
-                print("Skipping save, loss increased from {} to {}".format(prev_loss, self.train_loss.result()))
+                print('Saving new best model')
+                self.generate(filepath='samples/{}/generated_best.jpeg'.format(self.name))
 
             # log metrics
             with train_summary_writer.as_default():
@@ -123,8 +130,8 @@ class BaseRNN():
 
     def validation(self, dataloader, batch_size=32):
         batches = tqdm(dataloader.valid_dataset, total=dataloader.num_valid_batches,
-                       leave=True, desc="Validation")
+                       leave=True, desc='Validation')
         for batch in batches:
             loss, _ = self.train_step(batch, update_gradients=False)
             self.validation_loss(loss)
-            batches.set_description("Validation Loss: {:.6f}".format(self.validation_loss.result()))
+            batches.set_description('Validation Loss: {:.6f}'.format(self.validation_loss.result()))

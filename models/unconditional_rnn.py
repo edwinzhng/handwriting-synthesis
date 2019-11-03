@@ -11,7 +11,7 @@ from utils import plot_stroke
 
 class UnconditionalRNN(BaseRNN):
     def __init__(self, *args, **kwargs):
-        super().__init__("models/weights/unconditional.h5", *args, **kwargs)
+        super().__init__('unconditional', *args, **kwargs)
 
     def build_model(self, batch_size):
         inputs = tf.keras.Input(shape=(None, self.input_size), batch_size=batch_size)
@@ -19,12 +19,12 @@ class UnconditionalRNN(BaseRNN):
         lstm_1 = self.lstm_layer((batch_size, None, self.input_size))(inputs)
         skip = tf.keras.layers.concatenate([inputs, lstm_1])
         lstm_2 = self.lstm_layer((None, self.num_cells + self.input_size))(skip)
-        skip = tf.keras.layers.concatenate([inputs, lstm_2])
-        lstm_3 = self.lstm_layer((None, self.num_cells + self.input_size))(skip)
+        # skip = tf.keras.layers.concatenate([inputs, lstm_2])
+        # lstm_3 = self.lstm_layer((None, self.num_cells + self.input_size))(skip)
 
-        skip = tf.keras.layers.concatenate([lstm_1, lstm_2, lstm_3])
+        skip = tf.keras.layers.concatenate([lstm_1, lstm_2])
         outputs = tf.keras.layers.Dense(self.params_per_mixture * self.num_mixtures + 1,
-                                             input_shape=(self.num_layers * self.num_cells,))(skip)
+                                             input_shape=(2 * self.num_cells,))(skip)
 
         self.model = tf.keras.Model(inputs=inputs, outputs=outputs)
         self.load()
@@ -59,7 +59,7 @@ class UnconditionalRNN(BaseRNN):
 
         return loss, gradients
 
-    def generate(self, max_timesteps=600, seed=None, filepath='samples/unconditional/generated.jpeg'):
+    def generate(self, max_timesteps=400, seed=None, filepath='samples/unconditional/generated.jpeg'):
         self.build_model(batch_size=1)
         self.model.reset_states()
         sample = np.zeros((1, max_timesteps + 1, 3), dtype='float32')
@@ -72,17 +72,18 @@ class UnconditionalRNN(BaseRNN):
             mixture_idx = mixture_dist.sample(seed=seed)
 
             # retrieve correct distribution values from mixture
-            mean1 = tf.gather(mean1, mixture_idx, axis=-1)
-            mean2 = tf.gather(mean2, mixture_idx, axis=-1)
-            stddev1 = tf.gather(stddev1, mixture_idx, axis=-1)
-            stddev2 = tf.gather(stddev2, mixture_idx, axis=-1)
-            correl = tf.gather(correl, mixture_idx, axis=-1)
+            mean1 = mean1[0,0,mixture_idx]
+            mean2 = mean2[0,0,mixture_idx]
+            stddev1 = stddev1[0,0,mixture_idx]
+            stddev2 = stddev2[0,0,mixture_idx]
+            correl = correl[0,0,mixture_idx]
 
             # sample for x, y offsets
             cov_matrix = [[stddev1 * stddev1, correl * stddev1 * stddev2],
                           [correl * stddev1 * stddev2, stddev2 * stddev2]]
             bivariate_gaussian_dist = tfp.distributions.MultivariateNormalDiag(loc=[mean1, mean2], scale_diag=cov_matrix)
-            x, y = bivariate_gaussian_dist.sample(seed=seed)[0]
+            bivariate_sample = bivariate_gaussian_dist.sample(seed=seed)
+            x, y = bivariate_sample[0,0], bivariate_sample[1,1]
 
             # sample for end of stroke
             bernoulli = tfp.distributions.Bernoulli(probs=end_stroke)
