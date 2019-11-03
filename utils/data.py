@@ -48,10 +48,23 @@ class Dataloader:
                                                                            padding='post',
                                                                            value=0.0)
 
+        self.train_dataset = tf.data.Dataset.from_tensor_slices(self.train_strokes)
+        self.train_dataset = self.train_dataset.batch(self.batch_size, drop_remainder=self.drop_remainder)
+
+        self.valid_dataset = tf.data.Dataset.from_tensor_slices(self.valid_strokes)
+        self.valid_dataset = self.valid_dataset.batch(self.batch_size, drop_remainder=self.drop_remainder)
+
+        self.sentence_train_dataset = tf.data.Dataset.from_tensor_slices(self.train_sentences)
+        self.sentence_train_dataset = self.sentence_train_dataset.batch(self.batch_size,
+                                                                        drop_remainder=self.drop_remainder)
+
+        self.sentence_valid_dataset = tf.data.Dataset.from_tensor_slices(self.valid_sentences)
+        self.sentence_valid_dataset = self.sentence_valid_dataset.batch(self.batch_size,
+                                                                         drop_remainder=self.drop_remainder)
+
+
     def load_datasets(self):
-        train_dataset = tf.data.Dataset.from_tensor_slices(self.train_strokes)
-        train_dataset = train_dataset.batch(self.batch_size, drop_remainder=self.drop_remainder)
-        self.train_dataset = train_dataset.shuffle(buffer_size=self.buffer_size)
+        self.train_dataset = self.train_dataset.shuffle(buffer_size=self.buffer_size)
         self.num_train_batches = len(self.train_strokes) // self.batch_size
 
         valid_dataset = tf.data.Dataset.from_tensor_slices(self.valid_strokes)

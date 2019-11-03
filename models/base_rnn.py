@@ -64,12 +64,12 @@ class BaseRNN():
             / (2 * np.pi * stddev1 * stddev2 * tf.math.sqrt(1 - tf.math.square(correl)))
 
     def save(self, suffix=''):
-        filepath = '{}/{}{}.h5'.format(self.weights_path, self.name, suffix)
+        filepath = '{}/{}{}'.format(self.weights_path, self.name, suffix)
         self.model.save_weights(filepath, overwrite=True)
         print('Model weights saved to {}'.format(filepath))
 
     def load(self, suffix=''):
-        filepath = '{}/{}{}.h5'.format(self.weights_path, self.name, suffix)
+        filepath = '{}/{}{}'.format(self.weights_path, self.name, suffix)
         try:
             self.model.load_weights(filepath)
             print('Model weights loaded from {}'.format(filepath))
@@ -109,18 +109,12 @@ class BaseRNN():
             if self.validation_loss.result() < best_loss:
                 self.save('_best')
                 best_loss = self.validation_loss.result()
-                print('Saving new best model')
-
-            generated = False
-            if epoch % epochs_per_save == 0:
-                self.generate(filepath='samples/{}/generated_{}.jpeg'.format(self.name, epoch))
-                generated = True
-
-            if self.validation_loss.result() < best_loss:
                 self.generate(filepath='samples/{}/generated_best.jpeg'.format(self.name))
-                generated = True
-            
-            if generated:
+                self.build_model()
+
+            if epoch % epochs_per_save == 0:
+                self.save('_{}'.format(epoch))
+                self.generate(filepath='samples/{}/generated_{}.jpeg'.format(self.name, epoch))
                 self.build_model()
 
             # log metrics
