@@ -64,12 +64,12 @@ class BaseRNN():
             / (2 * np.pi * stddev1 * stddev2 * tf.math.sqrt(1 - tf.math.square(correl)))
 
     def save(self, suffix=''):
-        filepath = '{}/{}{}'.format(self.weights_path, self.name, suffix)
+        filepath = '{}/{}{}.h5'.format(self.weights_path, self.name, suffix)
         self.model.save_weights(filepath, overwrite=True)
         print('Model weights saved to {}'.format(filepath))
 
     def load(self, suffix=''):
-        filepath = '{}/{}{}'.format(self.weights_path, self.name, suffix)
+        filepath = '{}/{}{}.h5'.format(self.weights_path, self.name, suffix)
         try:
             self.model.load_weights(filepath)
             print('Model weights loaded from {}'.format(filepath))
@@ -77,7 +77,7 @@ class BaseRNN():
             print('Could not load weights from {}'.format(filepath))
 
     def train(self, epochs=50, batch_size=64, learning_rate=0.0001, epochs_per_save=10):
-        self.build_model(batch_size=batch_size)
+        self.build_model(True)
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
         #self.optimizer = tf.keras.optimizers.RMSprop(learning_rate=learning_rate, rho=0.95,
         #                                             momentum=0.9, epsilon=0.0001)
@@ -111,11 +111,10 @@ class BaseRNN():
                 self.save('_best')
                 best_loss = self.train_loss.result()
                 self.generate(filepath='samples/{}/generated_best.jpeg'.format(self.name))
-                self.build_model('_best')
+                self.build_model(True, '_best')
 
-            if epoch % epochs_per_save == 0:
+            if epoch > 0 and (epoch + 1) % epochs_per_save == 0:
                 self.save('_{}'.format(epoch))
-                self.build_model('_{}'.format(epoch))
 
             # log metrics
             with train_summary_writer.as_default():

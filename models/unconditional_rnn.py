@@ -13,8 +13,16 @@ class UnconditionalRNN(BaseRNN):
     def __init__(self, *args, **kwargs):
         super().__init__('unconditional', *args, **kwargs)
 
-    def build_model(self, load_suffix='_best', batch_size=None, stateful=False):
-        inputs = tf.keras.Input(shape=(None, self.input_size), batch_size=batch_size)
+    def build_model(self, train, load_suffix='_best'):
+        batch_size = None if train else 1
+        stateful = False if train else True
+
+        model_inputs = tf.keras.Input(shape=(None, self.input_size), batch_size=batch_size)
+
+        if train:
+            inputs = tf.keras.layers.Masking(mask_value=0.0, input_shape=(batch_size, None, self.input_size))(model_inputs)
+        else:
+            inputs = model_inputs
 
         lstm_1 = self.lstm_layer((batch_size, None, self.input_size), stateful=stateful)(inputs)
         skip = tf.keras.layers.concatenate([inputs, lstm_1])
@@ -26,7 +34,7 @@ class UnconditionalRNN(BaseRNN):
         outputs = tf.keras.layers.Dense(self.params_per_mixture * self.num_mixtures + 1,
                                              input_shape=(self.num_layers * self.num_cells,))(skip)
 
-        self.model = tf.keras.Model(inputs=inputs, outputs=outputs)
+        self.model = tf.keras.Model(inputs=model_inputs, outputs=outputs)
         self.load(load_suffix)
 
     # Equation (26)
@@ -47,13 +55,11 @@ class UnconditionalRNN(BaseRNN):
             tape.watch(inputs)
             outputs = self.model(inputs)
             end_stroke, mixture_weight, mean1, mean2, stddev1, stddev2, correl = self.output_vector(outputs)
-
             input_end_stroke = tf.expand_dims(tf.gather(inputs, 0, axis=-1), axis=-1)
             x = tf.expand_dims(tf.gather(inputs, 1, axis=-1), axis=-1)
             y = tf.expand_dims(tf.gather(inputs, 2, axis=-1), axis=-1)
             loss = tf.reduce_mean(self.loss(x, y, input_end_stroke, mean1, mean2,
                                             stddev1, stddev2, correl, mixture_weight, end_stroke))
-
         trainable_vars = self.model.trainable_variables
         gradients = tape.gradient(loss, trainable_vars)
         gradients, _ = tf.clip_by_global_norm(gradients, self.gradient_clip)
@@ -64,7 +70,7 @@ class UnconditionalRNN(BaseRNN):
         return loss, gradients
 
     def generate(self, max_timesteps=400, seed=None, filepath='samples/unconditional/generated.jpeg'):
-        self.build_model(batch_size=1, stateful=True)
+        self.build_model(False)
         sample = np.zeros((1, max_timesteps + 1, 3), dtype='float32')
         for i in range(max_timesteps):
             outputs = self.model(sample[:,i:i+1,:])
@@ -80,7 +86,6 @@ class UnconditionalRNN(BaseRNN):
             stddev1 = tf.gather(stddev1, mixture_idx, axis=-1)
             stddev2 = tf.gather(stddev2, mixture_idx, axis=-1)
             correl = tf.gather(correl, mixture_idx, axis=-1)
-            print("GEN: ", end_stroke, mixture_weight, mean1, stddev1, correl)
 
             # sample for x, y offsets
             cov_matrix = [[stddev1 * stddev1, correl * stddev1 * stddev2],

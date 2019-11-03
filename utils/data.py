@@ -56,10 +56,12 @@ class Dataloader:
         self.num_valid_batches = np.math.ceil(len(self.valid_strokes) // self.batch_size)
 
         # build strokes datasets
-        self.train_strokes = tf.keras.preprocessing.sequence.pad_sequences(self.train_strokes, dtype='float32',
-                                                                           padding='post', value=0.0)
-        self.valid_strokes = tf.keras.preprocessing.sequence.pad_sequences(self.valid_strokes, dtype='float32',
-                                                                           padding='post', value=0.0)
+        self.train_strokes = tf.keras.preprocessing.sequence.pad_sequences(self.train_strokes,
+                                                                           dtype='float32',
+                                                                           padding='post')
+        self.valid_strokes = tf.keras.preprocessing.sequence.pad_sequences(self.valid_strokes,
+                                                                           dtype='float32',
+                                                                           padding='post')
         
         self.train_strokes = tf.data.Dataset.from_tensor_slices(self.train_strokes)
         self.train_strokes = self.train_strokes.batch(self.batch_size, drop_remainder=self.drop_remainder)
@@ -68,10 +70,17 @@ class Dataloader:
         self.valid_strokes = self.valid_strokes.batch(self.batch_size, drop_remainder=self.drop_remainder)
 
         # build sentences datasets
-        self.train_sentences = [self.one_hot_encode(sentence, self.max_train_sentence_length)
+        self.train_sentences = [self.one_hot_encode(sentence)
                                 for sentence in self.train_sentences]
-        self.valid_sentences = [self.one_hot_encode(sentence, self.max_valid_sentence_length)
+        self.valid_sentences = [self.one_hot_encode(sentence)
                                 for sentence in self.valid_sentences]
+
+        self.train_sentences = tf.keras.preprocessing.sequence.pad_sequences(self.train_sentences,
+                                                                           dtype='float32',
+                                                                           padding='post')
+        self.valid_sentences = tf.keras.preprocessing.sequence.pad_sequences(self.valid_sentences,
+                                                                           dtype='float32',
+                                                                           padding='post')
 
         self.train_sentences = tf.data.Dataset.from_tensor_slices(self.train_sentences)
         self.train_sentences = self.train_sentences.batch(self.batch_size,
@@ -81,8 +90,8 @@ class Dataloader:
         self.valid_sentences = self.valid_sentences.batch(self.batch_size,
                                                                  drop_remainder=self.drop_remainder)
 
-    def one_hot_encode(self, sentence, max_length):
-        one_hot = np.zeros((max_length, self.num_characters), dtype='float32')
+    def one_hot_encode(self, sentence):
+        one_hot = np.zeros((len(sentence), self.num_characters), dtype='float32')
         for idx, char in enumerate(sentence):
             if char in self.char_to_index:
                 one_hot[idx][self.char_to_index[char]] = 1.0
