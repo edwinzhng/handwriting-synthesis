@@ -36,18 +36,18 @@ class BaseRNN():
                                     use_bias=True,
                                     bias_initializer='zeros')
 
-    # expands dims of coordinates for gaussian and loss calculations
-    def expand_dims(self, inputs, axis, num_dims):
-        return tf.concat([tf.expand_dims(inputs, axis) for _ in range(num_dims)], axis)
+    # expands dims of input coordinates for gaussian and loss calculations
+    def expand_input_dims(self, inputs):
+        return tf.concat([inputs for _ in range(self.num_mixtures)], -1)
 
     # Equations (18 - 23)
     def output_vector(self, outputs):
-        e_hat = outputs[:, :, 0]
+        e_hat = outputs[:, :, 0:1]
         pi_hat, mu_hat1, mu_hat2, sigma_hat1, sigma_hat2, rho_hat = tf.split(outputs[:, :, 1:], 6, -1)
 
         # calculate actual values
-        end_stroke = tf.math.sigmoid(e_hat)
-        mixture_weight = tf.math.softmax(pi_hat, axis=-1)
+        end_stroke = tf.math.sigmoid(-e_hat)
+        mixture_weight = tf.nn.softmax(pi_hat, axis=-1)
         mean1 = mu_hat1
         mean2 = mu_hat2
         stddev1 = tf.math.exp(sigma_hat1)
@@ -78,8 +78,9 @@ class BaseRNN():
 
     def train(self, epochs=50, batch_size=64, learning_rate=0.0001, epochs_per_save=10):
         self.build_model(batch_size=batch_size)
-        self.optimizer = tf.keras.optimizers.RMSprop(learning_rate=learning_rate, rho=0.95,
-                                                     momentum=0.9, epsilon=0.0001)
+        self.optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+        #self.optimizer = tf.keras.optimizers.RMSprop(learning_rate=learning_rate, rho=0.95,
+        #                                             momentum=0.9, epsilon=0.0001)
         self.model.summary()
         dataloader = Dataloader(batch_size=batch_size)
 
@@ -106,16 +107,15 @@ class BaseRNN():
             print('Finished Epoch {} with training loss {:.6f} and validation loss {:.6f}'.format(
                   epoch + 1, self.train_loss.result(), self.validation_loss.result()))
 
-            if self.validation_loss.result() < best_loss:
+            if self.train_loss.result() < best_loss:
                 self.save('_best')
-                best_loss = self.validation_loss.result()
+                best_loss = self.train_loss.result()
                 self.generate(filepath='samples/{}/generated_best.jpeg'.format(self.name))
-                self.build_model()
+                self.build_model('_best')
 
             if epoch % epochs_per_save == 0:
                 self.save('_{}'.format(epoch))
-                self.generate(filepath='samples/{}/generated_{}.jpeg'.format(self.name, epoch))
-                self.build_model()
+                self.build_model('_{}'.format(epoch))
 
             # log metrics
             with train_summary_writer.as_default():

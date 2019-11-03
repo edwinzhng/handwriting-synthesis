@@ -13,7 +13,7 @@ class UnconditionalRNN(BaseRNN):
     def __init__(self, *args, **kwargs):
         super().__init__('unconditional', *args, **kwargs)
 
-    def build_model(self, batch_size=None, stateful=False):
+    def build_model(self, load_suffix='_best', batch_size=None, stateful=False):
         inputs = tf.keras.Input(shape=(None, self.input_size), batch_size=batch_size)
 
         lstm_1 = self.lstm_layer((batch_size, None, self.input_size), stateful=stateful)(inputs)
@@ -27,15 +27,15 @@ class UnconditionalRNN(BaseRNN):
                                              input_shape=(self.num_layers * self.num_cells,))(skip)
 
         self.model = tf.keras.Model(inputs=inputs, outputs=outputs)
-        self.load('_best')
+        self.load(load_suffix)
 
     # Equation (26)
     def loss(self, x, y, input_end, mean1, mean2, stddev1, stddev2, correl, mixture_weight, end_stroke):
-        epsilon = 1e-10 # required for logs to not be NaN when value is zero
-        gaussian = mixture_weight * self.bivariate_gaussian(self.expand_dims(x, -1, self.num_mixtures),
-                                                            self.expand_dims(y, -1, self.num_mixtures),
+        epsilon = 1e-8 # required for logs to not be NaN when value is zero
+        gaussian = mixture_weight * self.bivariate_gaussian(self.expand_input_dims(x),
+                                                            self.expand_input_dims(y),
                                                             stddev1, stddev2, mean1, mean2, correl)
-        gaussian_loss = tf.reduce_sum(gaussian, axis=-1)
+        gaussian_loss = tf.expand_dims(tf.reduce_sum(gaussian, axis=-1), axis=-1)
         gaussian_loss = tf.math.log(tf.maximum(gaussian_loss, epsilon))
         bernoulli_loss = tf.where(tf.math.equal(tf.ones_like(input_end), input_end), end_stroke, 1 - end_stroke)
         bernoulli_loss = tf.math.log(tf.maximum(bernoulli_loss, epsilon))
@@ -44,10 +44,15 @@ class UnconditionalRNN(BaseRNN):
     @tf.function
     def train_step(self, inputs, update_gradients=True):
         with tf.GradientTape() as tape:
+            tape.watch(inputs)
             outputs = self.model(inputs)
             end_stroke, mixture_weight, mean1, mean2, stddev1, stddev2, correl = self.output_vector(outputs)
-            loss = tf.reduce_mean(self.loss(inputs[:,:,1], inputs[:,:,2], inputs[:,:,0], mean1, mean2,
-                                                  stddev1, stddev2, correl, mixture_weight, end_stroke)) / 800
+
+            input_end_stroke = tf.expand_dims(tf.gather(inputs, 0, axis=-1), axis=-1)
+            x = tf.expand_dims(tf.gather(inputs, 1, axis=-1), axis=-1)
+            y = tf.expand_dims(tf.gather(inputs, 2, axis=-1), axis=-1)
+            loss = tf.reduce_mean(self.loss(x, y, input_end_stroke, mean1, mean2,
+                                            stddev1, stddev2, correl, mixture_weight, end_stroke))
 
         trainable_vars = self.model.trainable_variables
         gradients = tape.gradient(loss, trainable_vars)
@@ -70,11 +75,12 @@ class UnconditionalRNN(BaseRNN):
             mixture_idx = mixture_dist.sample(seed=seed)
 
             # retrieve correct distribution values from mixture
-            mean1 = mean1[0,0,mixture_idx]
-            mean2 = mean2[0,0,mixture_idx]
-            stddev1 = stddev1[0,0,mixture_idx]
-            stddev2 = stddev2[0,0,mixture_idx]
-            correl = correl[0,0,mixture_idx]
+            mean1 = tf.gather(mean1, mixture_idx, axis=-1)
+            mean2 = tf.gather(mean2, mixture_idx, axis=-1)
+            stddev1 = tf.gather(stddev1, mixture_idx, axis=-1)
+            stddev2 = tf.gather(stddev2, mixture_idx, axis=-1)
+            correl = tf.gather(correl, mixture_idx, axis=-1)
+            print("GEN: ", end_stroke, mixture_weight, mean1, stddev1, correl)
 
             # sample for x, y offsets
             cov_matrix = [[stddev1 * stddev1, correl * stddev1 * stddev2],
@@ -85,7 +91,7 @@ class UnconditionalRNN(BaseRNN):
 
             # sample for end of stroke
             bernoulli = tfp.distributions.Bernoulli(probs=end_stroke)
-            end_cur_stroke = bernoulli.sample(1, seed=seed)
+            end_cur_stroke = bernoulli.sample(seed=seed)
 
             sample[0,i+1] = [end_cur_stroke, x, y]
             inputs = outputs
