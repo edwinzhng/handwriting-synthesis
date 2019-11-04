@@ -92,7 +92,7 @@ class BaseRNN():
 
         print('Training model...')
         for epoch in range(epochs):
-            dataloader.load_datasets()
+            dataloader.load_datasets(self.name == 'conditional')
             batches = tqdm(dataloader.train_dataset, total=dataloader.num_train_batches,
                             leave=True, desc='Epoch: {}/{}'.format(epoch + 1, epochs))
             for batch in batches:

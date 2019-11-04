@@ -17,28 +17,20 @@ class UnconditionalRNN(BaseRNN):
         batch_size = None if train else 1
         stateful = False if train else True
 
-        model_inputs = tf.keras.Input(shape=(None, self.input_size), batch_size=batch_size)
-
-        if train:
-            inputs = tf.keras.layers.Masking(mask_value=0.0, input_shape=(batch_size, None, self.input_size))(model_inputs)
-        else:
-            inputs = model_inputs
-
+        inputs = tf.keras.Input(shape=(None, self.input_size), batch_size=batch_size)
         lstm_1 = self.lstm_layer((batch_size, None, self.input_size), stateful=stateful)(inputs)
         skip = tf.keras.layers.concatenate([inputs, lstm_1])
         lstm_2 = self.lstm_layer((None, self.num_cells + self.input_size), stateful=stateful)(skip)
         skip = tf.keras.layers.concatenate([inputs, lstm_2])
         lstm_3 = self.lstm_layer((None, self.num_cells + self.input_size), stateful=stateful)(skip)
-
         skip = tf.keras.layers.concatenate([lstm_1, lstm_2, lstm_3])
         outputs = tf.keras.layers.Dense(self.params_per_mixture * self.num_mixtures + 1,
                                              input_shape=(self.num_layers * self.num_cells,))(skip)
-
-        self.model = tf.keras.Model(inputs=model_inputs, outputs=outputs)
+        self.model = tf.keras.Model(inputs=inputs, outputs=outputs)
         self.load(load_suffix)
 
     # Equation (26)
-    def loss(self, x, y, input_end, mean1, mean2, stddev1, stddev2, correl, mixture_weight, end_stroke):
+    def loss(self, x, y, input_end, mean1, mean2, stddev1, stddev2, correl, mixture_weight, end_stroke, mask):
         epsilon = 1e-8 # required for logs to not be NaN when value is zero
         gaussian = mixture_weight * self.bivariate_gaussian(self.expand_input_dims(x),
                                                             self.expand_input_dims(y),
@@ -47,19 +39,26 @@ class UnconditionalRNN(BaseRNN):
         gaussian_loss = tf.math.log(tf.maximum(gaussian_loss, epsilon))
         bernoulli_loss = tf.where(tf.math.equal(tf.ones_like(input_end), input_end), end_stroke, 1 - end_stroke)
         bernoulli_loss = tf.math.log(tf.maximum(bernoulli_loss, epsilon))
-        return tf.reduce_sum(tf.math.negative(gaussian_loss + bernoulli_loss), axis=1)
+        negative_log_loss = tf.math.negative(gaussian_loss + bernoulli_loss)
+        negative_log_loss = tf.where(mask, negative_log_loss, tf.zeros_like(negative_log_loss))
+        return tf.reduce_mean(tf.reduce_sum(negative_log_loss, axis=1))
 
     @tf.function
-    def train_step(self, inputs, update_gradients=True):
+    def train_step(self, batch, update_gradients=True):
+        inputs, lengths = batch
+        mask = tf.expand_dims(tf.sequence_mask(lengths, tf.shape(inputs)[1]), -1)
+
         with tf.GradientTape() as tape:
             tape.watch(inputs)
+            tape.watch(mask)
             outputs = self.model(inputs)
             end_stroke, mixture_weight, mean1, mean2, stddev1, stddev2, correl = self.output_vector(outputs)
             input_end_stroke = tf.expand_dims(tf.gather(inputs, 0, axis=-1), axis=-1)
             x = tf.expand_dims(tf.gather(inputs, 1, axis=-1), axis=-1)
             y = tf.expand_dims(tf.gather(inputs, 2, axis=-1), axis=-1)
-            loss = tf.reduce_mean(self.loss(x, y, input_end_stroke, mean1, mean2,
-                                            stddev1, stddev2, correl, mixture_weight, end_stroke))
+            loss = self.loss(x, y, input_end_stroke, mean1, mean2, stddev1, stddev2,
+                             correl, mixture_weight, end_stroke, mask)
+
         trainable_vars = self.model.trainable_variables
         gradients = tape.gradient(loss, trainable_vars)
         gradients, _ = tf.clip_by_global_norm(gradients, self.gradient_clip)

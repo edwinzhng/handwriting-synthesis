@@ -19,6 +19,7 @@ class Dataloader:
         self.init_datasets()
 
     def init_datasets(self):
+        pad_sequences = tf.keras.preprocessing.sequence.pad_sequences
         base_path = Path(__file__).parent
         strokes_path = str((base_path / "../data/data.npy").resolve())
         sentences_path = str((base_path / "../data/sentences.txt").resolve())
@@ -37,7 +38,7 @@ class Dataloader:
         self.char_to_index = {}
         self.num_characters = len(characters) + 1
 
-        # first index reserved for unknown
+        # first index reserved for unknown character
         for idx, char in enumerate(characters):
             self.char_to_index[char] = idx + 1
 
@@ -50,45 +51,45 @@ class Dataloader:
                 self.train_strokes.append(stroke)
                 self.train_sentences.append(sentence)
 
-        self.max_train_sentence_length = max([len(sentence) for sentence in self.train_sentences])
-        self.max_valid_sentence_length = max([len(sentence) for sentence in self.valid_sentences])
         self.num_train_batches = np.math.ceil(len(self.train_strokes) // self.batch_size)
         self.num_valid_batches = np.math.ceil(len(self.valid_strokes) // self.batch_size)
 
+        # create custom sequence masks for stroke sequences
+        self.train_stroke_lenghts = [len(stroke) for stroke in self.train_strokes]
+        self.valid_stroke_lengths = [len(stroke) for stroke in self.valid_strokes]
+
         # build strokes datasets
-        self.train_strokes = tf.keras.preprocessing.sequence.pad_sequences(self.train_strokes,
-                                                                           dtype='float32',
-                                                                           padding='post')
-        self.valid_strokes = tf.keras.preprocessing.sequence.pad_sequences(self.valid_strokes,
-                                                                           dtype='float32',
-                                                                           padding='post')
+        self.train_strokes = pad_sequences(self.train_strokes, dtype='float32', padding='post')
+        self.valid_strokes = pad_sequences(self.valid_strokes, dtype='float32', padding='post')
+
+        self.train_strokes = tf.data.Dataset.from_tensor_slices(self.train_strokes) \
+                                .batch(self.batch_size, drop_remainder=self.drop_remainder)
+        self.train_stroke_lenghts = tf.data.Dataset.from_tensor_slices(self.train_stroke_lenghts) \
+                                        .batch(self.batch_size, drop_remainder=self.drop_remainder)
+
+        self.valid_strokes = tf.data.Dataset.from_tensor_slices(self.valid_strokes) \
+                                .batch(self.batch_size, drop_remainder=self.drop_remainder)
+        self.valid_stroke_lengths = tf.data.Dataset.from_tensor_slices(self.valid_stroke_lengths) \
+                                        .batch(self.batch_size, drop_remainder=self.drop_remainder)
         
-        self.train_strokes = tf.data.Dataset.from_tensor_slices(self.train_strokes)
-        self.train_strokes = self.train_strokes.batch(self.batch_size, drop_remainder=self.drop_remainder)
-
-        self.valid_strokes = tf.data.Dataset.from_tensor_slices(self.valid_strokes)
-        self.valid_strokes = self.valid_strokes.batch(self.batch_size, drop_remainder=self.drop_remainder)
-
         # build sentences datasets
-        self.train_sentences = [self.one_hot_encode(sentence)
-                                for sentence in self.train_sentences]
-        self.valid_sentences = [self.one_hot_encode(sentence)
-                                for sentence in self.valid_sentences]
+        self.train_sentences = [self.one_hot_encode(sentence) for sentence in self.train_sentences]
+        self.valid_sentences = [self.one_hot_encode(sentence) for sentence in self.valid_sentences]
+        self.train_sentence_lengths = [len(sentence) for sentence in self.train_sentences]
+        self.valid_sentence_lengths = [len(sentence) for sentence in self.valid_sentences]
 
-        self.train_sentences = tf.keras.preprocessing.sequence.pad_sequences(self.train_sentences,
-                                                                           dtype='float32',
-                                                                           padding='post')
-        self.valid_sentences = tf.keras.preprocessing.sequence.pad_sequences(self.valid_sentences,
-                                                                           dtype='float32',
-                                                                           padding='post')
+        self.train_sentences = pad_sequences(self.train_sentences, dtype='float32', padding='post')
+        self.valid_sentences = pad_sequences(self.valid_sentences, dtype='float32', padding='post')
 
-        self.train_sentences = tf.data.Dataset.from_tensor_slices(self.train_sentences)
-        self.train_sentences = self.train_sentences.batch(self.batch_size,
-                                                                 drop_remainder=self.drop_remainder)
+        self.train_sentences = tf.data.Dataset.from_tensor_slices(self.train_sentences) \
+                                .batch(self.batch_size, drop_remainder=self.drop_remainder)
+        self.train_sentence_lengths = tf.data.Dataset.from_tensor_slices(self.train_sentence_lengths) \
+                                        .batch(self.batch_size, drop_remainder=self.drop_remainder)
 
-        self.valid_sentences = tf.data.Dataset.from_tensor_slices(self.valid_sentences)
-        self.valid_sentences = self.valid_sentences.batch(self.batch_size,
-                                                                 drop_remainder=self.drop_remainder)
+        self.valid_sentences = tf.data.Dataset.from_tensor_slices(self.valid_sentences) \
+                                .batch(self.batch_size, drop_remainder=self.drop_remainder)
+        self.valid_sentence_lengths = tf.data.Dataset.from_tensor_slices(self.valid_sentence_lengths) \
+                                        .batch(self.batch_size, drop_remainder=self.drop_remainder)
 
     def one_hot_encode(self, sentence):
         one_hot = np.zeros((len(sentence), self.num_characters), dtype='float32')
@@ -101,12 +102,14 @@ class Dataloader:
 
     # loads datasets for training
     def load_datasets(self, include_sentences=False):
-        if not include_sentences:
-            self.train_dataset = self.train_strokes
-            self.valid_dataset = self.valid_strokes
-        else:
-            self.train_dataset = tf.data.Dataset.zip((self.train_strokes, self.train_sentences))
-            self.valid_dataset = tf.data.Dataset.zip((self.valid_strokes, self.valid_sentences))
+        self.train_dataset = tf.data.Dataset.zip((self.train_strokes, self.train_stroke_lenghts))
+        self.valid_dataset = tf.data.Dataset.zip((self.valid_strokes, self.valid_stroke_lengths))
+
+        if include_sentences:
+            self.train_dataset = tf.data.Dataset.zip((self.train_dataset,
+                                    self.train_sentences, self.train_sentence_lengths))
+            self.valid_dataset = tf.data.Dataset.zip((self.valid_dataset,
+                                    self.valid_sentences, self.train_sentence_lengths))
 
         # shuffle data
         self.train_dataset = self.train_dataset.shuffle(buffer_size=self.buffer_size)
