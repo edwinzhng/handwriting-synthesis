@@ -16,7 +16,6 @@ class BaseRNN():
                  gradient_clip=10):
         self.input_size = 3
         self.num_layers = 3
-        self.params_per_mixture = 6
         self.num_cells = 400
         self.num_mixtures = num_mixtures
         self.num_cells = num_cells
@@ -63,6 +62,22 @@ class BaseRNN():
         return tf.math.exp(-Z / (2 * (1 - tf.math.square(correl)))) \
             / (2 * np.pi * stddev1 * stddev2 * tf.math.sqrt(1 - tf.math.square(correl)))
 
+    # Equation (26)
+    def loss(self, x, y, input_end, mean1, mean2, stddev1, stddev2, correl, mixture_weight, end_stroke, mask):
+        epsilon = 1e-8 # required for logs to not be NaN when value is zero
+        gaussian = mixture_weight * self.bivariate_gaussian(self.expand_input_dims(x),
+                                                            self.expand_input_dims(y),
+                                                            stddev1, stddev2, mean1, mean2, correl)
+        gaussian_loss = tf.expand_dims(tf.reduce_sum(gaussian, axis=-1), axis=-1)
+        gaussian_loss = tf.math.log(tf.maximum(gaussian_loss, epsilon))
+        bernoulli_loss = tf.where(tf.math.equal(tf.ones_like(input_end), input_end), end_stroke, 1 - end_stroke)
+        bernoulli_loss = tf.math.log(tf.maximum(bernoulli_loss, epsilon))
+
+        # apply mask to timesteps to avoid gradient flow for padded input
+        negative_log_loss = tf.math.negative(gaussian_loss + bernoulli_loss)
+        negative_log_loss = tf.where(mask, negative_log_loss, tf.zeros_like(negative_log_loss))
+        return tf.reduce_mean(tf.reduce_sum(negative_log_loss, axis=1))
+
     def save(self, suffix=''):
         filepath = '{}/{}{}.h5'.format(self.weights_path, self.name, suffix)
         self.model.save_weights(filepath, overwrite=True)
@@ -81,7 +96,6 @@ class BaseRNN():
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
         #self.optimizer = tf.keras.optimizers.RMSprop(learning_rate=learning_rate, rho=0.95,
         #                                             momentum=0.9, epsilon=0.0001)
-        self.model.summary()
         dataloader = Dataloader(batch_size=batch_size)
 
         current_time = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')

@@ -102,14 +102,15 @@ class Dataloader:
 
     # loads datasets for training
     def load_datasets(self, include_sentences=False):
-        self.train_dataset = tf.data.Dataset.zip((self.train_strokes, self.train_stroke_lenghts))
-        self.valid_dataset = tf.data.Dataset.zip((self.valid_strokes, self.valid_stroke_lengths))
 
         if include_sentences:
-            self.train_dataset = tf.data.Dataset.zip((self.train_dataset,
-                                    self.train_sentences, self.train_sentence_lengths))
-            self.valid_dataset = tf.data.Dataset.zip((self.valid_dataset,
-                                    self.valid_sentences, self.train_sentence_lengths))
+            self.train_dataset = tf.data.Dataset.zip((self.train_strokes, self.train_stroke_lenghts,
+                                                      self.train_sentences, self.train_sentence_lengths))
+            self.valid_dataset = tf.data.Dataset.zip((self.valid_strokes, self.valid_stroke_lengths,
+                                                      self.valid_sentences, self.train_sentence_lengths))
+        else:
+            self.train_dataset = tf.data.Dataset.zip((self.train_strokes, self.train_stroke_lenghts))
+            self.valid_dataset = tf.data.Dataset.zip((self.valid_strokes, self.valid_stroke_lengths))
 
         # shuffle data
         self.train_dataset = self.train_dataset.shuffle(buffer_size=self.buffer_size)

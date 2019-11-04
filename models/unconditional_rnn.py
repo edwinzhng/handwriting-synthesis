@@ -24,33 +24,21 @@ class UnconditionalRNN(BaseRNN):
         skip = tf.keras.layers.concatenate([inputs, lstm_2])
         lstm_3 = self.lstm_layer((None, self.num_cells + self.input_size), stateful=stateful)(skip)
         skip = tf.keras.layers.concatenate([lstm_1, lstm_2, lstm_3])
-        outputs = tf.keras.layers.Dense(self.params_per_mixture * self.num_mixtures + 1,
-                                             input_shape=(self.num_layers * self.num_cells,))(skip)
+        outputs = tf.keras.layers.Dense(6 * self.num_mixtures + 1, input_shape=(self.num_layers * self.num_cells,))(skip)
         self.model = tf.keras.Model(inputs=inputs, outputs=outputs)
         self.load(load_suffix)
-
-    # Equation (26)
-    def loss(self, x, y, input_end, mean1, mean2, stddev1, stddev2, correl, mixture_weight, end_stroke, mask):
-        epsilon = 1e-8 # required for logs to not be NaN when value is zero
-        gaussian = mixture_weight * self.bivariate_gaussian(self.expand_input_dims(x),
-                                                            self.expand_input_dims(y),
-                                                            stddev1, stddev2, mean1, mean2, correl)
-        gaussian_loss = tf.expand_dims(tf.reduce_sum(gaussian, axis=-1), axis=-1)
-        gaussian_loss = tf.math.log(tf.maximum(gaussian_loss, epsilon))
-        bernoulli_loss = tf.where(tf.math.equal(tf.ones_like(input_end), input_end), end_stroke, 1 - end_stroke)
-        bernoulli_loss = tf.math.log(tf.maximum(bernoulli_loss, epsilon))
-        negative_log_loss = tf.math.negative(gaussian_loss + bernoulli_loss)
-        negative_log_loss = tf.where(mask, negative_log_loss, tf.zeros_like(negative_log_loss))
-        return tf.reduce_mean(tf.reduce_sum(negative_log_loss, axis=1))
 
     @tf.function
     def train_step(self, batch, update_gradients=True):
         inputs, lengths = batch
-        mask = tf.expand_dims(tf.sequence_mask(lengths, tf.shape(inputs)[1]), -1)
-
+        lengths = tf.cast(lengths, dtype=tf.float32)
+ 
         with tf.GradientTape() as tape:
             tape.watch(inputs)
-            tape.watch(mask)
+            tape.watch(lengths)
+
+            mask = tf.expand_dims(tf.sequence_mask(lengths, tf.shape(inputs)[1]), -1)
+
             outputs = self.model(inputs)
             end_stroke, mixture_weight, mean1, mean2, stddev1, stddev2, correl = self.output_vector(outputs)
             input_end_stroke = tf.expand_dims(tf.gather(inputs, 0, axis=-1), axis=-1)
@@ -61,17 +49,18 @@ class UnconditionalRNN(BaseRNN):
 
         trainable_vars = self.model.trainable_variables
         gradients = tape.gradient(loss, trainable_vars)
-        gradients, _ = tf.clip_by_global_norm(gradients, self.gradient_clip)
+        for i, grad in enumerate(gradients):
+            gradients[i] = tf.clip_by_value(gradients[i], -self.gradient_clip, self.gradient_clip)
 
         if update_gradients:
             self.optimizer.apply_gradients(zip(gradients, trainable_vars))
 
         return loss, gradients
 
-    def generate(self, max_timesteps=400, seed=None, filepath='samples/unconditional/generated.jpeg'):
+    def generate(self, timesteps=400, seed=None, filepath='samples/unconditional/generated.jpeg'):
         self.build_model(False)
-        sample = np.zeros((1, max_timesteps + 1, 3), dtype='float32')
-        for i in range(max_timesteps):
+        sample = np.zeros((1, timesteps + 1, 3), dtype='float32')
+        for i in range(timesteps):
             outputs = self.model(sample[:,i:i+1,:])
             end_stroke, mixture_weight, mean1, mean2, stddev1, stddev2, correl = self.output_vector(outputs)
 
