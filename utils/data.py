@@ -33,10 +33,12 @@ class Dataloader:
         self.valid_strokes = []
         self.valid_sentences = []
 
-        # removed any characters belonging in '0123456789\n+/#():;'
-        characters = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ .,"\'!?'
+        # removed any characters belonging in ' 0123456789\n+/#():;?!'
+        characters = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.,"\''
         self.char_to_index = {}
         self.num_characters = len(characters) + 1
+
+        assert self.num_characters == 57
 
         # first index reserved for unknown character
         for idx, char in enumerate(characters):

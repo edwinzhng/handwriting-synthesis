@@ -93,6 +93,7 @@ class BaseRNN():
 
     def train(self, epochs=50, batch_size=64, learning_rate=0.0001, epochs_per_save=10):
         self.build_model(True)
+        self.model.summary()
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
         #self.optimizer = tf.keras.optimizers.RMSprop(learning_rate=learning_rate, rho=0.95,
         #                                             momentum=0.9, epsilon=0.0001)
