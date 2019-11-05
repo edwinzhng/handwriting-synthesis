@@ -29,7 +29,25 @@ class LSTMAttentionCell(tf.keras.layers.Layer):
         h_lstm, c_lstm = lstm_states
 
         window_out = self.window(lstm)
-        w, kappa = self.process_window(window_out, sentence_inputs, sentence_lengths, prev_kappa)
+        alpha_hat, beta_hat, kappa_hat = tf.split(window_out, 3, -1)
+        mask = tf.sequence_mask(sentence_lengths, tf.shape(sentence_inputs)[1])
+
+        # Equations (49-51)
+        alpha = tf.expand_dims(tf.math.exp(alpha_hat), -1)
+        beta = tf.expand_dims(tf.math.exp(beta_hat), -1)
+        kappa = tf.expand_dims(prev_kappa + tf.math.exp(kappa_hat), -1)
+
+        u = tf.range(1, tf.shape(sentence_inputs)[-2] + 1, delta=1.0, dtype=tf.float32)
+        u = tf.expand_dims(u, 0)
+        u = tf.expand_dims(u, 0)
+        u = tf.tile(u, (tf.shape(sentence_inputs)[0], self.window_gaussians, 1))
+
+        # Equations (46-47)
+        phi = alpha * tf.math.exp(tf.math.negative(beta) * tf.math.square(kappa - u))
+        phi = tf.reduce_sum(phi, axis=1)
+        phi = tf.squeeze(tf.where(mask, phi, tf.zeros_like(phi)))
+        w = tf.reduce_sum(tf.expand_dims(phi, -1) * sentence_inputs, axis=1)
+        kappa = tf.squeeze(kappa, -1)
         return (lstm, kappa, w), (h_lstm, c_lstm, kappa, w)
 
     def get_initial_state(self, inputs=None, batch_size=None, dtype=None):
@@ -38,25 +56,6 @@ class LSTMAttentionCell(tf.keras.layers.Layer):
         h_lstm, c_lstm = self.lstm.get_initial_state(inputs, batch_size, dtype)
         return (h_lstm, c_lstm, tf.zeros((batch_size, self.window_gaussians)),
                 tf.zeros((batch_size, self.num_characters)))
-
-    def process_window(self, window_outputs, sentence, sentence_length, prev_kappa):
-        alpha_hat, beta_hat, kappa_hat = tf.split(window_outputs, 3, -1)
-        mask = tf.sequence_mask(sentence_length)
-
-        # Equations (49-51)
-        alpha = tf.math.exp(alpha_hat)
-        beta = tf.math.exp(beta_hat)
-        kappa = prev_kappa + tf.math.exp(kappa_hat)
-
-        # Equations (46-47)
-        u = tf.range(1, tf.shape(sentence)[-2], delta=1.0, dtype=tf.float32)
-        u = tf.expand_dims(u, axis=0)
-        u = tf.expand_dims(u, axis=-1)
-        phi = alpha * tf.math.exp(tf.math.negative(beta) * tf.math.square(kappa - u))
-        phi = tf.reduce_sum(phi, axis=-1)
-        phi = tf.where(mask, phi, tf.zeros_like(phi))
-        w = tf.reduce_sum(phi * sentence, axis=1)
-        return w, kappa
 
 class ConditionalRNN(BaseRNN):
     def __init__(self, *args, **kwargs):
@@ -110,7 +109,7 @@ class ConditionalRNN(BaseRNN):
             stroke_mask = tf.expand_dims(tf.sequence_mask(stroke_lengths, tf.shape(stroke_inputs)[1]), -1)
 
             outputs, kappa, w = self.model((stroke_inputs, sentence_inputs,
-                                                sentence_lengths, prev_kappa, prev_w))
+                                            sentence_lengths, prev_kappa, prev_w))
             end_stroke, mixture_weight, mean1, mean2, stddev1, stddev2, correl = self.output_vector(outputs)
             input_end_stroke = tf.expand_dims(tf.gather(stroke_inputs, 0, axis=-1), axis=-1)
             x = tf.expand_dims(tf.gather(stroke_inputs, 1, axis=-1), axis=-1)
@@ -120,13 +119,47 @@ class ConditionalRNN(BaseRNN):
 
         trainable_vars = self.model.trainable_variables
         gradients = tape.gradient(loss, trainable_vars)
-        gradients = tf.clip_by_value(gradients, -self.gradient_clip, self.gradient_clip)
+        for i, grad in enumerate(gradients):
+            gradients[i] = tf.clip_by_value(gradients[i], -self.gradient_clip, self.gradient_clip)
 
         if update_gradients:
             self.optimizer.apply_gradients(zip(gradients, trainable_vars))
 
-        return loss, gradients, w
+        return loss, gradients
 
-    def generate(self, text, seed=None, filepath='samples/conditional/generated.jpeg'):
+    def generate(self, text, timesteps=800, seed=None, filepath='samples/conditional/generated.jpeg'):
         self.build_model(True)
-        sample = np.zeros((1, 800 + 1, 3), dtype='float32')
+        sample = np.zeros((1, timesteps + 1, 3), dtype='float32')
+        for i in range(timesteps):
+            outputs = self.model(sample[:,i:i+1,:])
+            end_stroke, mixture_weight, mean1, mean2, stddev1, stddev2, correl = self.output_vector(outputs)
+
+            # sample for MDN index from mixture weights
+            mixture_dist = tfp.distributions.Categorical(probs=mixture_weight[0,0])
+            mixture_idx = mixture_dist.sample(seed=seed)
+
+            # retrieve correct distribution values from mixture
+            mean1 = tf.gather(mean1, mixture_idx, axis=-1)
+            mean2 = tf.gather(mean2, mixture_idx, axis=-1)
+            stddev1 = tf.gather(stddev1, mixture_idx, axis=-1)
+            stddev2 = tf.gather(stddev2, mixture_idx, axis=-1)
+            correl = tf.gather(correl, mixture_idx, axis=-1)
+
+            # sample for x, y offsets
+            cov_matrix = [[stddev1 * stddev1, correl * stddev1 * stddev2],
+                          [correl * stddev1 * stddev2, stddev2 * stddev2]]
+            bivariate_gaussian_dist = tfp.distributions.MultivariateNormalDiag(loc=[mean1, mean2], scale_diag=cov_matrix)
+            bivariate_sample = bivariate_gaussian_dist.sample(seed=seed)
+            x, y = bivariate_sample[0,0], bivariate_sample[1,1]
+
+            # sample for end of stroke
+            bernoulli = tfp.distributions.Bernoulli(probs=end_stroke)
+            end_cur_stroke = bernoulli.sample(seed=seed)
+
+            sample[0,i+1] = [end_cur_stroke, x, y]
+            inputs = outputs
+
+        # remove first zeros
+        sample = sample[0,1:]
+        plot_stroke(sample, save_name=filepath)
+        return sample
