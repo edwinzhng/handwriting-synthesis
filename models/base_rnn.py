@@ -3,6 +3,7 @@ import os
 
 import numpy as np
 import tensorflow as tf
+import tensorflow_probability as tfp
 from tqdm import tqdm
 
 from utils.data import Dataloader
@@ -125,7 +126,7 @@ class BaseRNN():
             if self.train_loss.result() < best_loss:
                 self.save('_best')
                 best_loss = self.train_loss.result()
-                self.generate(filepath='samples/{}/generated_best.jpeg'.format(self.name))
+                self.generate(filepath='samples/{}/generated_best.png'.format(self.name))
                 self.build_model(True, '_best')
 
             if epoch > 0 and (epoch + 1) % epochs_per_save == 0:
@@ -148,3 +149,29 @@ class BaseRNN():
             loss, _ = self.train_step(batch, update_gradients=False)
             self.validation_loss(loss)
             batches.set_description('Validation Loss: {:.6f}'.format(self.validation_loss.result()))
+
+    def sample(self, outputs, seed):
+        end_stroke, mixture_weight, mean1, mean2, stddev1, stddev2, correl = self.output_vector(outputs)
+
+        # sample for MDN index from mixture weights
+        mixture_dist = tfp.distributions.Categorical(probs=mixture_weight[0,0])
+        mixture_idx = mixture_dist.sample(seed=seed)
+
+        # retrieve correct distribution values from mixture
+        mean1 = tf.gather(mean1, mixture_idx, axis=-1)
+        mean2 = tf.gather(mean2, mixture_idx, axis=-1)
+        stddev1 = tf.gather(stddev1, mixture_idx, axis=-1)
+        stddev2 = tf.gather(stddev2, mixture_idx, axis=-1)
+        correl = tf.gather(correl, mixture_idx, axis=-1)
+
+        # sample for x, y offsets
+        cov_matrix = [[stddev1 * stddev1, correl * stddev1 * stddev2],
+                        [correl * stddev1 * stddev2, stddev2 * stddev2]]
+        bivariate_gaussian_dist = tfp.distributions.MultivariateNormalDiag(loc=[mean1, mean2], scale_diag=cov_matrix)
+        bivariate_sample = bivariate_gaussian_dist.sample(seed=seed)
+        x, y = bivariate_sample[0,0], bivariate_sample[1,1]
+
+        # sample for end of stroke
+        bernoulli = tfp.distributions.Bernoulli(probs=end_stroke)
+        end_cur_stroke = bernoulli.sample(seed=seed)
+        return [end_cur_stroke, x, y]

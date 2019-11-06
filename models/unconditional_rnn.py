@@ -62,31 +62,7 @@ class UnconditionalRNN(BaseRNN):
         sample = np.zeros((1, timesteps + 1, 3), dtype='float32')
         for i in range(timesteps):
             outputs = self.model(sample[:,i:i+1,:])
-            end_stroke, mixture_weight, mean1, mean2, stddev1, stddev2, correl = self.output_vector(outputs)
-
-            # sample for MDN index from mixture weights
-            mixture_dist = tfp.distributions.Categorical(probs=mixture_weight[0,0])
-            mixture_idx = mixture_dist.sample(seed=seed)
-
-            # retrieve correct distribution values from mixture
-            mean1 = tf.gather(mean1, mixture_idx, axis=-1)
-            mean2 = tf.gather(mean2, mixture_idx, axis=-1)
-            stddev1 = tf.gather(stddev1, mixture_idx, axis=-1)
-            stddev2 = tf.gather(stddev2, mixture_idx, axis=-1)
-            correl = tf.gather(correl, mixture_idx, axis=-1)
-
-            # sample for x, y offsets
-            cov_matrix = [[stddev1 * stddev1, correl * stddev1 * stddev2],
-                          [correl * stddev1 * stddev2, stddev2 * stddev2]]
-            bivariate_gaussian_dist = tfp.distributions.MultivariateNormalDiag(loc=[mean1, mean2], scale_diag=cov_matrix)
-            bivariate_sample = bivariate_gaussian_dist.sample(seed=seed)
-            x, y = bivariate_sample[0,0], bivariate_sample[1,1]
-
-            # sample for end of stroke
-            bernoulli = tfp.distributions.Bernoulli(probs=end_stroke)
-            end_cur_stroke = bernoulli.sample(seed=seed)
-
-            sample[0,i+1] = [end_cur_stroke, x, y]
+            sample[0,i+1] = self.sample(outputs, seed)
             inputs = outputs
 
         # remove first zeros

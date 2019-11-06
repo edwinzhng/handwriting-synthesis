@@ -3,6 +3,28 @@ from pathlib import Path
 import numpy as np
 import tensorflow as tf
 
+def one_hot_encode(sentence, num_characters, char_to_index):
+    one_hot = np.zeros((len(sentence), num_characters), dtype='float32')
+    for idx, char in enumerate(sentence):
+        if char in char_to_index:
+            one_hot[idx][char_to_index[char]] = 1.0
+        else:
+            one_hot[idx][0] = 1.0
+    return one_hot
+
+def char_to_index():
+    # removed any characters belonging in ' 0123456789\n+/#():;?!'
+    characters = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.,"\''
+    char_to_index = {}
+    num_characters = len(characters) + 1
+
+    assert num_characters == 57
+
+    # first index reserved for unknown character
+    for idx, char in enumerate(characters):
+        char_to_index[char] = idx + 1
+
+    return char_to_index, num_characters
 
 class Dataloader:
     def __init__(self,
@@ -33,16 +55,7 @@ class Dataloader:
         self.valid_strokes = []
         self.valid_sentences = []
 
-        # removed any characters belonging in ' 0123456789\n+/#():;?!'
-        characters = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.,"\''
-        self.char_to_index = {}
-        self.num_characters = len(characters) + 1
-
-        assert self.num_characters == 57
-
-        # first index reserved for unknown character
-        for idx, char in enumerate(characters):
-            self.char_to_index[char] = idx + 1
+        self.char_to_index, self.num_characters = char_to_index()
 
         # filter out long sequences and use them as validation set
         for stroke, sentence in zip(strokes, sentences):
@@ -75,8 +88,10 @@ class Dataloader:
                                         .batch(self.batch_size, drop_remainder=self.drop_remainder)
         
         # build sentences datasets
-        self.train_sentences = [self.one_hot_encode(sentence) for sentence in self.train_sentences]
-        self.valid_sentences = [self.one_hot_encode(sentence) for sentence in self.valid_sentences]
+        self.train_sentences = [one_hot_encode(sentence, self.num_characters, self.char_to_index)
+                                for sentence in self.train_sentences]
+        self.valid_sentences = [one_hot_encode(sentence, self.num_characters, self.char_to_index)
+                                for sentence in self.valid_sentences]
         self.train_sentence_lengths = [len(sentence) for sentence in self.train_sentences]
         self.valid_sentence_lengths = [len(sentence) for sentence in self.valid_sentences]
 
@@ -92,15 +107,6 @@ class Dataloader:
                                 .batch(self.batch_size, drop_remainder=self.drop_remainder)
         self.valid_sentence_lengths = tf.data.Dataset.from_tensor_slices(self.valid_sentence_lengths) \
                                         .batch(self.batch_size, drop_remainder=self.drop_remainder)
-
-    def one_hot_encode(self, sentence):
-        one_hot = np.zeros((len(sentence), self.num_characters), dtype='float32')
-        for idx, char in enumerate(sentence):
-            if char in self.char_to_index:
-                one_hot[idx][self.char_to_index[char]] = 1.0
-            else:
-                one_hot[idx][0] = 1.0
-        return one_hot
 
     # loads datasets for training
     def load_datasets(self, include_sentences=False):
