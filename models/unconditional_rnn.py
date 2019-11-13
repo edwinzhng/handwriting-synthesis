@@ -13,55 +13,70 @@ class UnconditionalRNN(BaseRNN):
     def __init__(self, *args, **kwargs):
         super().__init__('unconditional', *args, **kwargs)
 
-    def build_model(self, train, load_suffix='_best'):
-        batch_size = None if train else 1
-        stateful = False if train else True
+    def build_model(self, seq_length, load_suffix='_best'):
+        inputs = tf.keras.Input(shape=(seq_length, self.input_size))
+        input_h_1 = tf.keras.Input(self.num_cells)
+        input_c_1 = tf.keras.Input(self.num_cells)
+        input_h_2 = tf.keras.Input(self.num_cells)
+        input_c_2 = tf.keras.Input(self.num_cells)
+        input_h_3 = tf.keras.Input(self.num_cells)
+        input_c_3 = tf.keras.Input(self.num_cells)
+        input_states = [input_h_1, input_c_1, input_h_2, input_c_2, input_h_3, input_c_3]
 
-        inputs = tf.keras.Input(shape=(None, self.input_size), batch_size=batch_size)
-        lstm_1 = self.lstm_layer((batch_size, None, self.input_size), stateful=stateful)(inputs)
-        skip = tf.keras.layers.concatenate([inputs, lstm_1])
-        lstm_2 = self.lstm_layer((None, self.num_cells + self.input_size), stateful=stateful)(skip)
-        skip = tf.keras.layers.concatenate([inputs, lstm_2])
-        lstm_3 = self.lstm_layer((None, self.num_cells + self.input_size), stateful=stateful)(skip)
-        skip = tf.keras.layers.concatenate([lstm_1, lstm_2, lstm_3])
-        outputs = tf.keras.layers.Dense(6 * self.num_mixtures + 1, input_shape=(self.num_layers * self.num_cells,))(skip)
-        self.model = tf.keras.Model(inputs=inputs, outputs=outputs)
+        lstm_1, h_1, c_1 = self.lstm_layer(name='lstm_1')(inputs, initial_state=[input_h_1, input_c_1])
+
+        skip_1 = tf.keras.layers.concatenate([inputs, lstm_1], name='skip_1')
+        lstm_2, h_2, c_2 = self.lstm_layer(name='lstm_2')(skip_1, initial_state=[input_h_2, input_c_2])
+
+        skip_2 = tf.keras.layers.concatenate([inputs, lstm_2], name='skip_2')
+        lstm_3, h_3, c_3 = self.lstm_layer(name='lstm_3')(skip_2, initial_state=[input_h_3, input_c_3])
+
+        skip_3 = tf.keras.layers.concatenate([lstm_1, lstm_2, lstm_3], name='skip_3')
+        outputs = tf.keras.layers.Dense(6 * self.num_mixtures + 1, name='mdn')(skip_3)
+
+        output_states = [h_1, c_1, h_2, c_2, h_3, c_3]
+        self.model = tf.keras.Model(inputs=[inputs, input_states], outputs=[outputs, output_states])
         self.load(load_suffix)
 
-    @tf.function
     def train_step(self, batch, update_gradients=True):
         inputs, lengths = batch
+        input_states = [tf.zeros((tf.shape(inputs)[0], self.num_cells))] * 2 * self.num_layers
         lengths = tf.cast(lengths, dtype=tf.float32)
- 
+
         with tf.GradientTape() as tape:
             tape.watch(inputs)
             tape.watch(lengths)
 
-            mask = tf.expand_dims(tf.sequence_mask(lengths, tf.shape(inputs)[1]), -1)
+            mask = tf.sequence_mask(lengths, tf.shape(inputs)[1])
 
-            outputs = self.model(inputs)
+            outputs, output_states = self.model([inputs, input_states])
             end_stroke, mixture_weight, mean1, mean2, stddev1, stddev2, correl = self.output_vector(outputs)
-            input_end_stroke = tf.expand_dims(tf.gather(inputs, 0, axis=-1), axis=-1)
-            x = tf.expand_dims(tf.gather(inputs, 1, axis=-1), axis=-1)
-            y = tf.expand_dims(tf.gather(inputs, 2, axis=-1), axis=-1)
+            input_end_stroke = inputs[:,:,0]
+            x = inputs[:,:,1]
+            y = inputs[:,:,2]
             loss = self.loss(x, y, input_end_stroke, mean1, mean2, stddev1, stddev2,
                              correl, mixture_weight, end_stroke, mask)
 
-        trainable_vars = self.model.trainable_variables
-        gradients = tape.gradient(loss, trainable_vars)
+        trainable_variables = self.model.trainable_variables
+        gradients = tape.gradient(loss, trainable_variables)
         for i, grad in enumerate(gradients):
-            gradients[i] = tf.clip_by_value(gradients[i], -self.gradient_clip, self.gradient_clip)
+            if trainable_variables[i].name.startswith('lstm'):
+                gradients[i] = tf.clip_by_value(grad, -10.0, 10.0)
+            elif trainable_variables[i].name.startswith('mdn'):
+                gradients[i] = tf.clip_by_value(grad, -100.0, 100.0)
 
         if update_gradients:
-            self.optimizer.apply_gradients(zip(gradients, trainable_vars))
+            self.optimizer.apply_gradients(zip(gradients, trainable_variables))
 
         return loss, gradients
 
     def generate(self, timesteps=400, seed=None, filepath='samples/unconditional/generated.jpeg'):
-        self.build_model(False)
+        self.build_model(seq_length=1)
         sample = np.zeros((1, timesteps + 1, 3), dtype='float32')
+        input_states = [tf.zeros((1, self.num_cells))] * 2 * self.num_layers
+
         for i in range(timesteps):
-            outputs = self.model(sample[:,i:i+1,:])
+            outputs, input_states = self.model([sample[:,i:i+1,:], input_states])
             sample[0,i+1] = self.sample(outputs, seed)
             inputs = outputs
 
