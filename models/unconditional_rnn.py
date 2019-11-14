@@ -39,21 +39,22 @@ class UnconditionalRNN(BaseRNN):
         self.load(load_suffix)
 
     def train_step(self, batch, update_gradients=True):
-        inputs, lengths = batch
+        inputs, next_inputs, lengths = batch
         input_states = [tf.zeros((tf.shape(inputs)[0], self.num_cells))] * 2 * self.num_layers
-        lengths = tf.cast(lengths, dtype=tf.float32)
 
         with tf.GradientTape() as tape:
             tape.watch(inputs)
-            tape.watch(lengths)
+            tape.watch(next_inputs)
 
+            # create sequence mask
             mask = tf.sequence_mask(lengths, tf.shape(inputs)[1])
 
+            # calculate loss
             outputs, output_states = self.model([inputs, input_states])
             end_stroke, mixture_weight, mean1, mean2, stddev1, stddev2, correl = self.output_vector(outputs)
-            input_end_stroke = inputs[:,:,0]
-            x = inputs[:,:,1]
-            y = inputs[:,:,2]
+            input_end_stroke = next_inputs[:,:,0]
+            x = next_inputs[:,:,1]
+            y = next_inputs[:,:,2]
             loss = self.loss(x, y, input_end_stroke, mean1, mean2, stddev1, stddev2,
                              correl, mixture_weight, end_stroke, mask)
 

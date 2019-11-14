@@ -61,8 +61,8 @@ class BaseRNN():
     def bivariate_gaussian(self, x, y, stddev1, stddev2, mean1, mean2, correl):
         Z = tf.math.square((x - mean1) / stddev1) + tf.math.square((y - mean2) / stddev2) \
             - (2 * correl * (x - mean1) * (y - mean2) / (stddev1 * stddev2))
-        return tf.math.exp(-Z / (2 * (1 - tf.math.square(correl)) + self.epsilon)) \
-            / (2 * np.pi * stddev1 * stddev2 * tf.math.sqrt(1 - tf.math.square(correl)) + self.epsilon)
+        return tf.math.exp(-Z / (2 * (1 - tf.math.square(correl)))) \
+            / (2 * np.pi * stddev1 * stddev2 * tf.math.sqrt(1 - tf.math.square(correl)))
 
     # Equation (26)
     def loss(self, x, y, input_end, mean1, mean2, stddev1, stddev2, correl, mixture_weight, end_stroke, mask):
