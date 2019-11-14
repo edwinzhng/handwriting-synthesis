@@ -13,8 +13,8 @@ class UnconditionalRNN(BaseRNN):
     def __init__(self, *args, **kwargs):
         super().__init__('unconditional', *args, **kwargs)
 
-    def build_model(self, seq_length, load_suffix='_best'):
-        inputs = tf.keras.Input(shape=(seq_length, self.input_size))
+    def build_model(self, seq_length, sentence_length=None, load_suffix='_best'):
+        inputs = tf.keras.Input((seq_length, self.input_size))
         input_h_1 = tf.keras.Input(self.num_cells)
         input_c_1 = tf.keras.Input(self.num_cells)
         input_h_2 = tf.keras.Input(self.num_cells)

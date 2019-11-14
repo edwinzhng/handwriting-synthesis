@@ -10,18 +10,22 @@ from utils.data import char_to_index, one_hot_encode
 
 
 class LSTMAttentionCell(tf.keras.layers.Layer):
-    def __init__(self, num_cells, num_characters, window_gaussians, *args, **kwargs):
+    def __init__(self, num_cells, num_characters, window_gaussians, regularizer, *args, **kwargs):
         super(LSTMAttentionCell, self).__init__(*args, **kwargs)
-        self.lstm = tf.keras.layers.LSTMCell(num_cells + num_characters)
-        self.window = tf.keras.layers.Dense(3 * window_gaussians, input_shape=(num_cells,))
+        self.lstm = tf.keras.layers.LSTMCell(num_cells,
+                                             kernel_regularizer=regularizer,
+                                             recurrent_regularizer=regularizer,
+                                             name='lstm_1')
+        self.window = tf.keras.layers.Dense(3 * window_gaussians, name='window')
         self.num_characters = num_characters
         self.window_gaussians = window_gaussians
 
-        # lstm cell state, lstm recurrent state, prev_kappa, prev_w
+        # h_1, c_1, prev_kappa, prev_w
         self.state_size = (num_cells, num_cells, window_gaussians, num_characters)
+        # lstm, phi
         self.output_size = (num_cells, num_characters, num_characters)
 
-    def call(self, inputs, states, constants, training):
+    def call(self, inputs, states, constants):
         sentence_inputs, sentence_lengths = constants
         prev_h_lstm, prev_c_lstm, prev_kappa, prev_w = states
 
@@ -30,8 +34,8 @@ class LSTMAttentionCell(tf.keras.layers.Layer):
 
         window_out = self.window(lstm)
         alpha_hat, beta_hat, kappa_hat = tf.split(window_out, 3, -1)
-        mask = tf.cast(tf.sequence_mask(sentence_lengths,
-                       tf.shape(sentence_inputs)[1]), dtype=tf.float32)
+        mask = tf.sequence_mask(sentence_lengths, tf.shape(sentence_inputs)[1])
+        mask = tf.cast(mask, dtype=tf.float32)
 
         # Equations (49-51)
         alpha = tf.expand_dims(tf.math.exp(alpha_hat), -1)
@@ -41,11 +45,14 @@ class LSTMAttentionCell(tf.keras.layers.Layer):
         u = tf.range(1, tf.shape(sentence_inputs)[-2] + 1, delta=1.0, dtype=tf.float32)
         u = tf.expand_dims(u, 0)
         u = tf.expand_dims(u, 0)
+        # shape (batch_size, num_gaussians, max_sentence_length)
         u = tf.tile(u, (tf.shape(sentence_inputs)[0], self.window_gaussians, 1))
+        # print(u, mask)
 
         # Equations (46-47)
         phi = alpha * tf.math.exp(tf.math.negative(beta) * tf.math.square(kappa - u))
-        phi = tf.reduce_sum(phi, axis=1)
+        phi = tf.reduce_sum(phi, axis=1) # shape (batch_size, max_sentence_length)
+        # print(phi)
         w = tf.reduce_sum(tf.expand_dims(phi, -1) * sentence_inputs, axis=1)
         kappa = tf.squeeze(kappa, -1)
         return (lstm, phi, w), (h_lstm, c_lstm, kappa, w)
@@ -62,76 +69,84 @@ class ConditionalRNN(BaseRNN):
         super().__init__('conditional', *args, **kwargs)
         self.num_characters = 57
         self.window_gaussians = 10
+        self.initial_states(1)
 
-    def build_model(self, train, load_suffix='_best'):
-        batch_size = None if train else 1
-        stateful = False if train else True
+    def build_model(self, seq_length, sentence_length, load_suffix='_best'):
+        inputs = tf.keras.Input((seq_length, self.input_size))
+        sentence_inputs = tf.keras.Input((sentence_length, self.num_characters))
+        sentence_lengths = tf.keras.Input(1)
+        input_h_1 = tf.keras.Input(self.num_cells)
+        input_c_1 = tf.keras.Input(self.num_cells)
+        input_h_2 = tf.keras.Input(self.num_cells)
+        input_c_2 = tf.keras.Input(self.num_cells)
+        input_h_3 = tf.keras.Input(self.num_cells)
+        input_c_3 = tf.keras.Input(self.num_cells)
+        input_kappa = tf.keras.Input(self.window_gaussians)
+        input_w = tf.keras.Input(self.num_characters)
+        input_states = [input_h_1, input_c_1, input_h_2, input_c_2,
+                        input_h_3, input_c_3, input_kappa, input_w]
 
-        inputs = tf.keras.Input(shape=(None, self.input_size), batch_size=batch_size)
-        sentence_inputs = tf.keras.Input(shape=(None, self.num_characters), batch_size=batch_size)
-        sentence_lengths = tf.keras.Input(shape=(1, ), batch_size=batch_size)
+        outputs, h_1, c_1, kappa, _ = tf.keras.layers.RNN(
+                                            LSTMAttentionCell(
+                                                self.num_cells,
+                                                self.num_characters,
+                                                self.window_gaussians,
+                                                self.regularizer
+                                            ),
+                                            return_sequences=True,
+                                            return_state=True,
+                                            name='lstm_attention'
+                                        )(inputs,
+                                          constants=[sentence_inputs, sentence_lengths],
+                                          initial_state=[input_h_1, input_h_2, input_kappa, input_w])
+        lstm_1, phi, w = outputs
+        skip_1 = tf.keras.layers.concatenate([inputs, lstm_1, w], name='skip_1')
+        lstm_2, h_2, c_2 = self.lstm_layer(name='lstm_2')(skip_1, initial_state=[input_h_2, input_c_2])
 
-        attention_out = tf.keras.layers.RNN(
-            LSTMAttentionCell(self.num_cells, self.num_characters, self.window_gaussians),
-            return_sequences=True,
-            return_state=True,
-            stateful=stateful)(inputs, constants=[sentence_inputs, sentence_lengths], training=train)
+        skip_2 = tf.keras.layers.concatenate([inputs, lstm_2, w], name='skip_2')
+        lstm_3, h_3, c_3 = self.lstm_layer(name='lstm_3')(skip_2, initial_state=[input_h_3, input_c_3])
 
-        lstm_1, phi, w = attention_out[0]
+        skip_3 = tf.keras.layers.concatenate([lstm_1, lstm_2, lstm_3], name='skip_3')
+        outputs = tf.keras.layers.Dense(6 * self.num_mixtures + 1, name='mdn')(skip_3)
 
-        skip = tf.keras.layers.concatenate([inputs, lstm_1, w])
-        lstm_2 = self.lstm_layer((None, self.num_cells + self.input_size + self.num_characters), stateful=stateful)(skip)
-        skip = tf.keras.layers.concatenate([inputs, lstm_2, w])
-        lstm_3 = self.lstm_layer((None, self.num_cells + self.input_size + self.num_characters), stateful=stateful)(skip)
-        skip = tf.keras.layers.concatenate([lstm_1, lstm_2, lstm_3])
-        outputs = tf.keras.layers.Dense(6 * self.num_mixtures + 1, input_shape=(self.num_layers * self.num_cells,))(skip)
-
-        self.model = tf.keras.Model(inputs=[inputs, sentence_inputs, sentence_lengths],
-                                    outputs=[outputs, phi, w])
+        output_states = [h_1, c_1, h_2, c_2, h_3, c_3, kappa, w]
+        self.model = tf.keras.Model(inputs=[inputs, input_states, sentence_inputs, sentence_lengths],
+                                    outputs=[outputs, output_states, phi])
         self.load(load_suffix)
 
-    @tf.function
-    def train_step(self, batch, update_gradients=True):
-        stroke_inputs, stroke_lengths, sentence_inputs, sentence_lengths = batch
-        stroke_lengths = tf.cast(stroke_lengths, dtype=tf.float32)
-        sentence_lengths = tf.cast(sentence_lengths, dtype=tf.float32)
-
+    def train_step(self, batch):
+        stroke_inputs, stroke_next_inputs, stroke_lengths, sentence_inputs, sentence_lengths = batch
+        input_states = self.initial_states(tf.shape(stroke_inputs)[0])
         with tf.GradientTape() as tape:
             tape.watch(stroke_inputs)
-            tape.watch(stroke_lengths)
             tape.watch(sentence_inputs)
-            tape.watch(sentence_lengths)
 
-            stroke_mask = tf.expand_dims(tf.sequence_mask(stroke_lengths, tf.shape(stroke_inputs)[1]), -1)
+            # create sequence mask
+            stroke_mask = tf.sequence_mask(stroke_lengths, tf.shape(stroke_inputs)[1])
 
-            outputs, phi, w = self.model((stroke_inputs, sentence_inputs, sentence_lengths))
+            # calculate loss
+            outputs, output_states, phi = self.model([stroke_inputs, input_states, sentence_inputs, sentence_lengths])
             end_stroke, mixture_weight, mean1, mean2, stddev1, stddev2, correl = self.output_vector(outputs)
-            input_end_stroke = tf.expand_dims(tf.gather(stroke_inputs, 0, axis=-1), axis=-1)
-            x = tf.expand_dims(tf.gather(stroke_inputs, 1, axis=-1), axis=-1)
-            y = tf.expand_dims(tf.gather(stroke_inputs, 2, axis=-1), axis=-1)
+            input_end_stroke = stroke_next_inputs[:,:,0]
+            x = stroke_next_inputs[:,:,1]
+            y = stroke_next_inputs[:,:,2]
             loss = self.loss(x, y, input_end_stroke, mean1, mean2, stddev1, stddev2,
                              correl, mixture_weight, end_stroke, stroke_mask)
 
-        trainable_vars = self.model.trainable_variables
-        gradients = tape.gradient(loss, trainable_vars)
-        for i, grad in enumerate(gradients):
-            gradients[i] = tf.clip_by_value(gradients[i], -self.gradient_clip, self.gradient_clip)
+        return self.apply_gradients(loss, tape)
 
-        if update_gradients:
-            self.optimizer.apply_gradients(zip(gradients, trainable_vars))
-
-        return loss, gradients
-
-    def generate(self, text, timesteps=800, seed=None, filepath='samples/conditional/generated.png'):
-        self.build_model(True)
+    def generate(self, text, timesteps=800, seed=None, filepath='samples/conditional.png'):
+        self.build_model(seq_length=1)
         sample = np.zeros((1, timesteps + 1, 3), dtype='float32')
         char_index, _ = char_to_index()
 
         one_hot_text = tf.expand_dims(one_hot_encode(text, self.num_characters, char_index), 0)
         text_length = tf.expand_dims(len(text), 0)
 
+        input_states = self.initial_states(1)
+
         for i in range(timesteps):
-            outputs, phi, w = self.model((sample[:,i:i+1,:], one_hot_text, text_length))
+            outputs, input_states, phi = self.model([sample[:,i:i+1,:], input_states, one_hot_text, text_length])
             sample[0,i+1] = self.sample(outputs, seed)
             inputs = outputs
 
@@ -150,3 +165,10 @@ class ConditionalRNN(BaseRNN):
         sample = sample[0,1:i]
         plot_stroke(sample, save_name=filepath)
         return sample
+
+    def initial_states(self, batch_size):
+        input_kappa = tf.zeros((batch_size, self.window_gaussians))
+        input_w = tf.zeros((batch_size, self.num_characters))
+        input_states = [tf.zeros((batch_size, self.num_cells))] * 2 * self.num_layers
+        input_states.extend([input_kappa, input_w])
+        return input_states

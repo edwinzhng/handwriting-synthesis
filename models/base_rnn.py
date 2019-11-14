@@ -95,8 +95,7 @@ class BaseRNN():
 
     def train(self, epochs=50, batch_size=64, learning_rate=0.0001, epochs_per_save=10):
         dataloader = Dataloader(batch_size=batch_size)
-
-        self.build_model(dataloader.max_sequence_length)
+        self.build_model(dataloader.max_sequence_length, dataloader.max_sentence_length)
         self.model.summary()
         self.optimizer = tf.keras.optimizers.RMSprop(learning_rate=learning_rate, rho=0.95,
                                                      momentum=0.9, epsilon=0.0001)
@@ -116,7 +115,7 @@ class BaseRNN():
                 loss, gradients = self.train_step(batch)
                 self.train_loss(loss)
                 self.gradient_norm(tf.linalg.global_norm(gradients))
-                batches.set_description('Epoch: {}/{} Loss: {:.6f}'.format(epoch + 1, epochs, 
+                batches.set_description('Epoch: {}/{} Loss: {:.6f}'.format(epoch + 1, epochs,
                                                                            self.train_loss.result()))
 
             print('Epoch {}: training loss {:.6f}'.format(epoch + 1, self.train_loss.result()))

@@ -37,8 +37,9 @@ class Dataloader:
         self.buffer_size = buffer_size
         self.drop_remainder = drop_remainder
         self.max_sequence_length = max_sequence_length
+        self.init_datasets()
 
-    def load_datasets(self, include_sentences=False):
+    def init_datasets(self):
         pad_sequences = tf.keras.preprocessing.sequence.pad_sequences
         base_path = Path(__file__).parent
         strokes_path = str((base_path / "../data/data.npy").resolve())
@@ -57,14 +58,10 @@ class Dataloader:
         # filter out long sequences
         for stroke, sentence in zip(strokes, sentences):
             # add one extra point to max length for calculating loss using x_{t+1}
-            if len(stroke) > self.max_sequence_length + 1:
-                start_index = np.random.choice(len(stroke) - self.max_sequence_length - 1)
-                end_index = start_index + self.max_sequence_length + 1
-                stroke = stroke[start_index:end_index]
-
-            self.train_strokes.append(stroke[:-1])
-            self.train_next_strokes.append(stroke[1:])
-            self.train_sentences.append(sentence)
+            if len(stroke) <= self.max_sequence_length + 1:
+                self.train_strokes.append(stroke[:-1])
+                self.train_next_strokes.append(stroke[1:])
+                self.train_sentences.append(sentence)
 
         self.num_train_batches = np.math.ceil(len(self.train_strokes) // self.batch_size)
 
@@ -81,19 +78,22 @@ class Dataloader:
                                     .batch(self.batch_size, drop_remainder=self.drop_remainder)
         self.train_stroke_lengths = tf.data.Dataset.from_tensor_slices(self.train_stroke_lengths) \
                                         .batch(self.batch_size, drop_remainder=self.drop_remainder)
-        
+
+        # build sentences datasets
+        self.train_sentences = [one_hot_encode(sentence, self.num_characters, self.char_to_index)
+                                for sentence in self.train_sentences]
+        self.train_sentence_lengths = [len(sentence) for sentence in self.train_sentences]
+        self.max_sentence_length = max(self.train_sentence_lengths)
+
+        self.train_sentences = pad_sequences(self.train_sentences, dtype='float32', padding='post')
+
+        self.train_sentences = tf.data.Dataset.from_tensor_slices(self.train_sentences) \
+                                .batch(self.batch_size, drop_remainder=self.drop_remainder)
+        self.train_sentence_lengths = tf.data.Dataset.from_tensor_slices(self.train_sentence_lengths) \
+                                        .batch(self.batch_size, drop_remainder=self.drop_remainder)
+
+    def load_datasets(self, include_sentences=False):
         if include_sentences:
-            # build sentences datasets
-            self.train_sentences = [one_hot_encode(sentence, self.num_characters, self.char_to_index)
-                                    for sentence in self.train_sentences]
-            self.train_sentence_lengths = [len(sentence) for sentence in self.train_sentences]
-
-            self.train_sentences = pad_sequences(self.train_sentences, dtype='float32', padding='post')
-
-            self.train_sentences = tf.data.Dataset.from_tensor_slices(self.train_sentences) \
-                                    .batch(self.batch_size, drop_remainder=self.drop_remainder)
-            self.train_sentence_lengths = tf.data.Dataset.from_tensor_slices(self.train_sentence_lengths) \
-                                            .batch(self.batch_size, drop_remainder=self.drop_remainder)
             self.train_dataset = tf.data.Dataset.zip((self.train_strokes, self.train_next_strokes, self.train_stroke_lengths,
                                                       self.train_sentences, self.train_sentence_lengths))
         else:
