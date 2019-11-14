@@ -1,5 +1,6 @@
 import datetime
 import os
+from pathlib import Path
 
 import numpy as np
 import tensorflow as tf
@@ -23,11 +24,13 @@ class BaseRNN():
         self.num_cells = num_cells
         self.gradient_clip = gradient_clip
         self.name = name
-        self.weights_path = 'models/weights'
         self.regularizer = tf.keras.regularizers.l2()
 
         self.train_loss = tf.keras.metrics.Mean('train_loss', dtype=tf.float32)
         self.gradient_norm = tf.keras.metrics.Mean('gradient_norm', dtype=tf.float32)
+
+        base_path = Path(__file__).parent
+        self.weights_path = str((base_path / "../models/weights").resolve())
 
     def lstm_layer(self, name=None):
         return tf.keras.layers.LSTM(self.num_cells,
@@ -113,14 +116,15 @@ class BaseRNN():
                 loss, gradients = self.train_step(batch)
                 self.train_loss(loss)
                 self.gradient_norm(tf.linalg.global_norm(gradients))
-
+                batches.set_description('Epoch: {}/{} Loss: {:.6f}'.format(epoch + 1, epochs, 
+                                                                           self.train_loss.result()))
 
             print('Epoch {}: training loss {:.6f}'.format(epoch + 1, self.train_loss.result()))
 
             if self.train_loss.result() < best_loss:
                 self.save('_best')
                 best_loss = self.train_loss.result()
-                self.generate(filepath='samples/{}/generated_best.png'.format(self.name))
+                self.generate(filepath='samples/{}.png'.format(self.name))
                 self.build_model(dataloader.max_sequence_length, '_best')
 
             if epoch > 0 and (epoch + 1) % epochs_per_save == 0:
@@ -133,6 +137,18 @@ class BaseRNN():
 
             self.train_loss.reset_states()
             self.gradient_norm.reset_states()
+
+    def apply_gradients(self, loss, tape):
+        trainable_vars = self.model.trainable_variables
+        gradients = tape.gradient(loss, trainable_vars)
+        for i, grad in enumerate(gradients):
+            if trainable_vars[i].name.startswith('lstm'):
+                gradients[i] = tf.clip_by_value(grad, -10.0, 10.0)
+            elif trainable_vars[i].name.startswith('mdn'):
+                gradients[i] = tf.clip_by_value(grad, -100.0, 100.0)
+
+        self.optimizer.apply_gradients(zip(gradients, trainable_vars))
+        return loss, gradients
 
     def sample(self, outputs, seed):
         end_stroke, mixture_weight, mean1, mean2, stddev1, stddev2, correl = self.output_vector(outputs)

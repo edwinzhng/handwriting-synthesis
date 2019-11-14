@@ -4,6 +4,7 @@ import numpy as np
 
 from models.conditional_rnn import ConditionalRNN
 from models.unconditional_rnn import UnconditionalRNN
+from utils import plot_stroke
 
 
 def generate_unconditionally(random_seed=None, filepath=None):
@@ -26,7 +27,9 @@ if __name__=="__main__":
     parser.add_argument('--text', '-t', type=str, default='welcome to lyrebird', help='text for conditional generation')
     args = parser.parse_args()
 
+    stroke = None
     if args.model == 'unconditional':
-        generate_unconditionally(args.seed, args.filepath)
+        stroke = generate_unconditionally(args.seed, args.filepath)
     else:
-        generate_conditionally(args.text, args.seed, args.filepath)
+        stroke =generate_conditionally(args.text, args.seed, args.filepath)
+    plot_stroke(stroke)

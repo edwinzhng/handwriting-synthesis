@@ -38,7 +38,7 @@ class UnconditionalRNN(BaseRNN):
         self.model = tf.keras.Model(inputs=[inputs, input_states], outputs=[outputs, output_states])
         self.load(load_suffix)
 
-    def train_step(self, batch, update_gradients=True):
+    def train_step(self, batch):
         inputs, next_inputs, lengths = batch
         input_states = [tf.zeros((tf.shape(inputs)[0], self.num_cells))] * 2 * self.num_layers
 
@@ -58,20 +58,9 @@ class UnconditionalRNN(BaseRNN):
             loss = self.loss(x, y, input_end_stroke, mean1, mean2, stddev1, stddev2,
                              correl, mixture_weight, end_stroke, mask)
 
-        trainable_variables = self.model.trainable_variables
-        gradients = tape.gradient(loss, trainable_variables)
-        for i, grad in enumerate(gradients):
-            if trainable_variables[i].name.startswith('lstm'):
-                gradients[i] = tf.clip_by_value(grad, -10.0, 10.0)
-            elif trainable_variables[i].name.startswith('mdn'):
-                gradients[i] = tf.clip_by_value(grad, -100.0, 100.0)
+        return self.apply_gradients(loss, tape)
 
-        if update_gradients:
-            self.optimizer.apply_gradients(zip(gradients, trainable_variables))
-
-        return loss, gradients
-
-    def generate(self, timesteps=400, seed=None, filepath='samples/unconditional/generated.jpeg'):
+    def generate(self, timesteps=400, seed=None, filepath='samples/unconditional.jpeg'):
         self.build_model(seq_length=1)
         sample = np.zeros((1, timesteps + 1, 3), dtype='float32')
         input_states = [tf.zeros((1, self.num_cells))] * 2 * self.num_layers

@@ -4,3 +4,11 @@ __pycache__
 notebooks/.ipynb_checkpoints/*
 .DS_STORE
 logs/
+
+*.h5
+!unconditional_best.h5
+!conditional_best.h5
+
+*.png
+!unconditional_best.png
+!conditional_best.png
