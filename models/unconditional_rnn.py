@@ -68,7 +68,6 @@ class UnconditionalRNN(BaseRNN):
         for i in range(timesteps):
             outputs, input_states = self.model([sample[:,i:i+1,:], input_states])
             sample[0,i+1] = self.sample(outputs, seed)
-            inputs = outputs
 
         # remove first zeros
         sample = sample[0,1:]

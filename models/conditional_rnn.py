@@ -35,9 +35,9 @@ class LSTMAttentionCell(tf.keras.layers.Layer):
         window_out = self.window(lstm)
         alpha_hat, beta_hat, kappa_hat = tf.split(window_out, 3, -1)
 
-        mask = tf.sequence_mask(sentence_lengths, tf.shape(sentence_inputs)[1])
+        mask = tf.sequence_mask(sentence_lengths, tf.shape(sentence_inputs)[-2])
         mask = tf.cast(mask, dtype=tf.float32)
-        mask = tf.reshape(mask, (tf.shape(inputs)[0], 1, tf.shape(sentence_inputs)[1]))
+        mask = tf.reshape(mask, (tf.shape(inputs)[0], 1, tf.shape(sentence_inputs)[-2]))
 
         # Equations (49-51)
         alpha = tf.expand_dims(tf.math.exp(alpha_hat), -1)
@@ -73,9 +73,9 @@ class ConditionalRNN(BaseRNN):
         self.window_gaussians = 10
         self.initial_states(1)
 
-    def build_model(self, seq_length, sentence_length, load_suffix='_best'):
+    def build_model(self, seq_length, max_sentence_length, load_suffix='_best'):
         inputs = tf.keras.Input((seq_length, self.input_size))
-        sentence_inputs = tf.keras.Input((sentence_length, self.num_characters))
+        sentence_inputs = tf.keras.Input((max_sentence_length, self.num_characters))
         sentence_lengths = tf.keras.Input(1)
         input_h_1 = tf.keras.Input(self.num_cells)
         input_c_1 = tf.keras.Input(self.num_cells)
@@ -138,22 +138,21 @@ class ConditionalRNN(BaseRNN):
         return self.apply_gradients(loss, tape)
 
     def generate(self, text, timesteps=800, seed=None, filepath='samples/conditional.png'):
-        self.build_model(seq_length=1)
+        self.build_model(seq_length=1, max_sentence_length=len(text))
         sample = np.zeros((1, timesteps + 1, 3), dtype='float32')
         char_index, _ = char_to_index()
 
         one_hot_text = tf.expand_dims(one_hot_encode(text, self.num_characters, char_index), 0)
-        text_length = tf.expand_dims(len(text), 0)
+        text_length = tf.expand_dims(tf.constant(len(text)), 0)
 
         input_states = self.initial_states(1)
-
         for i in range(timesteps):
             outputs, input_states, phi = self.model([sample[:,i:i+1,:], input_states, one_hot_text, text_length])
+            input_states[-1] = tf.reshape(input_states[-1], (1, self.num_characters))
             sample[0,i+1] = self.sample(outputs, seed)
-            inputs = outputs
 
             # stopping heuristic
-            finished = True
+            finished = False
             phi_last = phi[0,0,len(text)-1]
             for phi_u in phi[0,0,:len(text)-1]:
                 if phi_u.numpy() >= phi_last.numpy():

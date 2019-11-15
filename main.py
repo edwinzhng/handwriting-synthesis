@@ -31,5 +31,5 @@ if __name__=="__main__":
     if args.model == 'unconditional':
         stroke = generate_unconditionally(args.seed, args.filepath)
     else:
-        stroke =generate_conditionally(args.text, args.seed, args.filepath)
+        stroke = generate_conditionally(args.text, args.seed, args.filepath)
     plot_stroke(stroke)
