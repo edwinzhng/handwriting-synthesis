@@ -92,12 +92,16 @@ class Dataloader:
         self.train_sentence_lengths = tf.data.Dataset.from_tensor_slices(self.train_sentence_lengths) \
                                         .batch(self.batch_size, drop_remainder=self.drop_remainder)
 
+        self.conditional_dataset = tf.data.Dataset.zip((self.train_strokes, self.train_next_strokes, self.train_stroke_lengths,
+                                                        self.train_sentences, self.train_sentence_lengths))
+        self.unconditional_dataset = tf.data.Dataset.zip((self.train_strokes, self.train_next_strokes, self.train_stroke_lengths))
+
     def load_datasets(self, include_sentences=False):
+        dataset = None
         if include_sentences:
-            self.train_dataset = tf.data.Dataset.zip((self.train_strokes, self.train_next_strokes, self.train_stroke_lengths,
-                                                      self.train_sentences, self.train_sentence_lengths))
+            dataset = self.conditional_dataset
         else:
-            self.train_dataset = tf.data.Dataset.zip((self.train_strokes, self.train_next_strokes, self.train_stroke_lengths))
+            dataset = self.unconditional_dataset
 
         # shuffle data
-        self.train_dataset = self.train_dataset.shuffle(buffer_size=self.buffer_size)
+        self.train_dataset = dataset.shuffle(buffer_size=self.buffer_size)

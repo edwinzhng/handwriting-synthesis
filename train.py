@@ -19,7 +19,7 @@ if __name__=="__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', '-m', type=str, choices=['conditional', 'unconditional'], help='model type')
     parser.add_argument('--batch_size', '-b', type=int, default=32, help='batch size')
-    parser.add_argument('--epochs', '-e', type=int, default=50, help='number of epochs')
+    parser.add_argument('--epochs', '-e', type=int, default=100, help='number of epochs')
     parser.add_argument('--learning-rate', '-lr', type=float, default=0.0001, help='learning rate')
     args = parser.parse_args()
 

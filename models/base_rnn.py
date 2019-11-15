@@ -123,9 +123,8 @@ class BaseRNN():
             if self.train_loss.result() < best_loss:
                 self.save('_best')
                 best_loss = self.train_loss.result()
-                self.generate(filepath='samples/{}.png'.format(self.name))
-                self.build_model(dataloader.max_sequence_length, '_best')
-                tf.keras.backend.clear_session()
+                # self.generate(filepath='samples/{}.png'.format(self.name))
+                # self.build_model(dataloader.max_sequence_length, '_best')
 
             if epoch > 0 and (epoch + 1) % epochs_per_save == 0:
                 self.save('_{}'.format(epoch))
@@ -137,6 +136,7 @@ class BaseRNN():
 
             self.train_loss.reset_states()
             self.gradient_norm.reset_states()
+            tf.keras.backend.clear_session()
 
     def apply_gradients(self, loss, tape):
         trainable_vars = self.model.trainable_variables
