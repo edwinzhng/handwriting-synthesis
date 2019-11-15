@@ -29,7 +29,7 @@ def char_to_index():
 
 class Dataloader:
     def __init__(self,
-                 batch_size=16,
+                 batch_size=32,
                  buffer_size=100,
                  drop_remainder=False,
                  max_sequence_length=800):

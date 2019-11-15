@@ -125,6 +125,7 @@ class BaseRNN():
                 best_loss = self.train_loss.result()
                 self.generate(filepath='samples/{}.png'.format(self.name))
                 self.build_model(dataloader.max_sequence_length, '_best')
+                tf.keras.backend.clear_session()
 
             if epoch > 0 and (epoch + 1) % epochs_per_save == 0:
                 self.save('_{}'.format(epoch))

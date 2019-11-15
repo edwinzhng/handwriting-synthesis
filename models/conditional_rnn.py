@@ -34,8 +34,10 @@ class LSTMAttentionCell(tf.keras.layers.Layer):
 
         window_out = self.window(lstm)
         alpha_hat, beta_hat, kappa_hat = tf.split(window_out, 3, -1)
+
         mask = tf.sequence_mask(sentence_lengths, tf.shape(sentence_inputs)[1])
         mask = tf.cast(mask, dtype=tf.float32)
+        mask = tf.reshape(mask, (tf.shape(inputs)[0], 1, tf.shape(sentence_inputs)[1]))
 
         # Equations (49-51)
         alpha = tf.expand_dims(tf.math.exp(alpha_hat), -1)
@@ -45,14 +47,14 @@ class LSTMAttentionCell(tf.keras.layers.Layer):
         u = tf.range(1, tf.shape(sentence_inputs)[-2] + 1, delta=1.0, dtype=tf.float32)
         u = tf.expand_dims(u, 0)
         u = tf.expand_dims(u, 0)
+
         # shape (batch_size, num_gaussians, max_sentence_length)
         u = tf.tile(u, (tf.shape(sentence_inputs)[0], self.window_gaussians, 1))
-        # print(u, mask)
 
         # Equations (46-47)
         phi = alpha * tf.math.exp(tf.math.negative(beta) * tf.math.square(kappa - u))
+        phi = phi * mask
         phi = tf.reduce_sum(phi, axis=1) # shape (batch_size, max_sentence_length)
-        # print(phi)
         w = tf.reduce_sum(tf.expand_dims(phi, -1) * sentence_inputs, axis=1)
         kappa = tf.squeeze(kappa, -1)
         return (lstm, phi, w), (h_lstm, c_lstm, kappa, w)
