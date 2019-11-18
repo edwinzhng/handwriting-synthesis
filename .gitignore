@@ -10,5 +10,5 @@ logs/
 !conditional_best*.h5
 
 *.png
-!unconditional_best*.png
-!conditional_best*.png
+!samples/conditional/*.png
+!samples/unconditional/*.png

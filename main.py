@@ -26,10 +26,9 @@ if __name__=="__main__":
     parser.add_argument('--filepath', '-f', type=str, default=None, help='file path to save generated image')
     parser.add_argument('--text', '-t', type=str, default='welcome to lyrebird', help='text for conditional generation')
     args = parser.parse_args()
-
+    import tensorflow as tf
     stroke = None
     if args.model == 'unconditional':
-        stroke = generate_unconditionally(args.seed, args.filepath)
+        generate_unconditionally(args.seed, args.filepath)
     else:
-        stroke = generate_conditionally(args.text, args.seed, args.filepath)
-    plot_stroke(stroke)
+        generate_conditionally(args.text, args.seed, args.filepath)

@@ -137,7 +137,7 @@ class ConditionalRNN(BaseRNN):
 
         return self.apply_gradients(loss, tape)
 
-    def generate(self, text, timesteps=800, seed=None, filepath='samples/conditional.png'):
+    def generate(self, text, timesteps=1000, seed=None, filepath='samples/conditional.png'):
         self.build_model(seq_length=1, max_sentence_length=len(text))
         sample = np.zeros((1, timesteps + 1, 3), dtype='float32')
         char_index, _ = char_to_index()
@@ -152,12 +152,16 @@ class ConditionalRNN(BaseRNN):
             sample[0,i+1] = self.sample(outputs, seed)
 
             # stopping heuristic
-            finished = False
-            phi_last = phi[0,0,len(text)-1]
-            for phi_u in phi[0,0,:len(text)-1]:
-                if phi_u.numpy() >= phi_last.numpy():
+            finished = True
+            phi_last = phi[0,0,-1]
+            for phi_u in phi[0,0,:-1]:
+                if phi_u.numpy() > phi_last.numpy():
                     finished = False
                     break
+
+            # prevent early stopping
+            if i < 100:
+                finished = False
 
             if finished:
                 break
